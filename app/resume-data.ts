@@ -81,16 +81,6 @@ export const nodeOrder: NodeId[] = [
   "contact",
 ];
 
-export const nodePositions: Record<NodeId, { x: number; y: number }> = {
-  profile: { x: 550, y: 340 },
-  work: { x: 260, y: 170 },
-  projects: { x: 840, y: 170 },
-  teaching: { x: 190, y: 515 },
-  education: { x: 520, y: 540 },
-  skills: { x: 900, y: 515 },
-  contact: { x: 1000, y: 340 },
-};
-
 export const resumeData: Record<NodeId, ResumeNode> = {
   profile: {
     index: "NODE 00",
