@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Explore Darren Ng's software engineering work, projects, teaching, and technical skills in an interactive career studio."
+    />
+    <meta name="theme-color" content="#070b12" />
+    <title>Darren Ng — Midnight Systems Lab</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#quickResume">Skip the interactive world</a>
+
+    <div class="noise" aria-hidden="true"></div>
+    <div class="page-shell">
+      <header class="topbar">
+        <a class="brand" href="#" aria-label="Darren Ng, home">
+          <span class="brand-mark" aria-hidden="true">DN</span>
+          <span class="brand-copy">
+            <strong>Darren Ng</strong>
+            <small>Software Engineer</small>
+          </span>
+        </a>
+
+        <div class="system-status" aria-label="System online">
+          <span class="status-light"></span>
+          <span>SG / AVAILABLE</span>
+        </div>
+
+        <nav class="header-actions" aria-label="Primary navigation">
+          <a href="mailto:darren.ng577@gmail.com" class="text-link">Email</a>
+          <button class="button button-quiet" type="button" data-action="show-help">
+            Controls
+          </button>
+          <button class="button button-primary" type="button" data-action="open-resume">
+            Quick resume
+            <span aria-hidden="true">↗</span>
+          </button>
+        </nav>
+      </header>
+
+      <main id="main" class="main-layout">
+        <section class="studio-card" aria-labelledby="worldTitle">
+          <div class="studio-header">
+            <div>
+              <p class="eyebrow">Interactive portfolio / Sector 01</p>
+              <h1 id="worldTitle">Midnight Systems Lab</h1>
+            </div>
+            <div class="route-progress" aria-label="Exploration progress">
+              <span id="progressText">0 / 7 nodes</span>
+              <div class="progress-track" aria-hidden="true">
+                <span id="progressBar"></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="world-frame" id="worldFrame">
+            <div
+              class="world"
+              id="world"
+              role="application"
+              aria-label="Interactive career studio. Move with WASD or arrow keys. Press Enter or Space near a glowing node to inspect it."
+              tabindex="0"
+            >
+              <svg class="signal-map" viewBox="0 0 1100 680" aria-hidden="true">
+                <defs>
+                  <filter id="signalGlow" x="-50%" y="-50%" width="200%" height="200%">
+                    <feGaussianBlur stdDeviation="4" result="blur" />
+                    <feMerge>
+                      <feMergeNode in="blur" />
+                      <feMergeNode in="SourceGraphic" />
+                    </feMerge>
+                  </filter>
+                </defs>
+                <path class="cable" data-cable="work" d="M550 340 H465 V170 H260" />
+                <path class="cable" data-cable="projects" d="M550 340 H635 V170 H840" />
+                <path class="cable" data-cable="teaching" d="M550 340 H420 V515 H190" />
+                <path class="cable" data-cable="education" d="M550 340 V540 H520" />
+                <path class="cable" data-cable="skills" d="M550 340 H690 V515 H900" />
+                <path class="cable" data-cable="contact" d="M550 340 H1000" />
+              </svg>
+
+              <div class="room room-work" aria-hidden="true">
+                <span class="room-code">01 / BUILD LAB</span>
+                <div class="room-art work-art">
+                  <span class="server-stack"></span>
+                  <span class="data-table"></span>
+                  <span class="tiny-plant"></span>
+                </div>
+              </div>
+
+              <div class="room room-projects" aria-hidden="true">
+                <span class="room-code">02 / PROJECT LAB</span>
+                <div class="room-art project-art">
+                  <span class="project-pod pod-a"></span>
+                  <span class="project-pod pod-b"></span>
+                  <span class="robot-arm"></span>
+                </div>
+              </div>
+
+              <div class="room room-teaching" aria-hidden="true">
+                <span class="room-code">03 / MENTOR BAY</span>
+                <div class="room-art teaching-art">
+                  <span class="whiteboard"></span>
+                  <span class="desk desk-a"></span>
+                  <span class="desk desk-b"></span>
+                </div>
+              </div>
+
+              <div class="room room-education" aria-hidden="true">
+                <span class="room-code">04 / ARCHIVE</span>
+                <div class="room-art education-art">
+                  <span class="archive-row row-a"></span>
+                  <span class="archive-row row-b"></span>
+                  <span class="award-token">★</span>
+                </div>
+              </div>
+
+              <div class="room room-skills" aria-hidden="true">
+                <span class="room-code">05 / SYSTEMS</span>
+                <div class="room-art skills-art">
+                  <span class="console-screen"></span>
+                  <span class="console-keyboard"></span>
+                  <span class="server-stack small"></span>
+                </div>
+              </div>
+
+              <div class="hub-ring" aria-hidden="true">
+                <span class="hub-orbit orbit-a"></span>
+                <span class="hub-orbit orbit-b"></span>
+                <span class="hub-core">DN</span>
+              </div>
+
+              <button class="node node-profile" style="--x: 550; --y: 340" data-node="profile" type="button">
+                <span class="node-pulse"></span>
+                <span class="node-icon">DN</span>
+                <span class="node-label">PROFILE</span>
+              </button>
+              <button class="node node-work" style="--x: 260; --y: 170" data-node="work" type="button">
+                <span class="node-pulse"></span>
+                <span class="node-icon">&lt;/&gt;</span>
+                <span class="node-label">WORK</span>
+              </button>
+              <button class="node node-projects" style="--x: 840; --y: 170" data-node="projects" type="button">
+                <span class="node-pulse"></span>
+                <span class="node-icon">◇</span>
+                <span class="node-label">PROJECTS</span>
+              </button>
+              <button class="node node-teaching" style="--x: 190; --y: 515" data-node="teaching" type="button">
+                <span class="node-pulse"></span>
+                <span class="node-icon">A+</span>
+                <span class="node-label">TEACHING</span>
+              </button>
+              <button class="node node-education" style="--x: 520; --y: 540" data-node="education" type="button">
+                <span class="node-pulse"></span>
+                <span class="node-icon">★</span>
+                <span class="node-label">EDUCATION</span>
+              </button>
+              <button class="node node-skills" style="--x: 900; --y: 515" data-node="skills" type="button">
+                <span class="node-pulse"></span>
+                <span class="node-icon">{ }</span>
+                <span class="node-label">SKILLS</span>
+              </button>
+              <button class="node node-contact" style="--x: 1000; --y: 340" data-node="contact" type="button">
+                <span class="node-pulse"></span>
+                <span class="node-icon">↗</span>
+                <span class="node-label">CONTACT</span>
+              </button>
+
+              <div class="avatar" id="avatar" style="--x: 550; --y: 410" aria-hidden="true">
+                <span class="avatar-shadow"></span>
+                <span class="avatar-hair"></span>
+                <span class="avatar-face"></span>
+                <span class="avatar-body"></span>
+                <span class="avatar-arm avatar-arm-left"></span>
+                <span class="avatar-arm avatar-arm-right"></span>
+                <span class="avatar-leg avatar-leg-left"></span>
+                <span class="avatar-leg avatar-leg-right"></span>
+              </div>
+
+              <div class="proximity-prompt" id="proximityPrompt" aria-live="polite">
+                <kbd>E</kbd>
+                <span>Inspect profile</span>
+              </div>
+
+              <div class="world-hud hud-top-left" aria-hidden="true">
+                <span>LAB/SG-01</span>
+                <span class="hud-signal">•••</span>
+              </div>
+              <div class="world-hud hud-bottom-left" aria-hidden="true">
+                <span>X <b id="coordX">0550</b></span>
+                <span>Y <b id="coordY">0410</b></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="mobile-controls" aria-label="Touch movement controls">
+            <div class="dpad">
+              <button type="button" data-move="up" aria-label="Move up">↑</button>
+              <button type="button" data-move="left" aria-label="Move left">←</button>
+              <span aria-hidden="true"></span>
+              <button type="button" data-move="right" aria-label="Move right">→</button>
+              <button type="button" data-move="down" aria-label="Move down">↓</button>
+            </div>
+            <button class="interact-button" type="button" data-action="interact">Inspect</button>
+          </div>
+
+          <footer class="studio-footer">
+            <div class="control-hint">
+              <span><kbd>WASD</kbd> Move</span>
+              <span><kbd>E</kbd> Inspect</span>
+              <span><kbd>R</kbd> Resume</span>
+              <span><kbd>?</kbd> Help</span>
+            </div>
+            <p>Move through the lab or select any glowing node directly.</p>
+          </footer>
+        </section>
+
+        <aside class="navigator-card" aria-labelledby="navigatorTitle">
+          <div class="navigator-head">
+            <div>
+              <p class="eyebrow">Career navigator</p>
+              <h2 id="navigatorTitle">Field notes</h2>
+            </div>
+            <span class="live-badge"><i></i> LIVE</span>
+          </div>
+
+          <div class="identity-card">
+            <div class="identity-avatar" aria-hidden="true">DN</div>
+            <div>
+              <h3>Darren Ng Yijie</h3>
+              <p>Software engineer building dependable products, data systems, and learning tools.</p>
+            </div>
+          </div>
+
+          <div class="route-list" id="routeList" aria-label="Jump to a career zone"></div>
+
+          <div class="current-signal">
+            <span class="signal-label">Current signal</span>
+            <strong id="currentSignal">Identity Atrium</strong>
+            <p id="currentSignalHint">The best place to begin.</p>
+          </div>
+
+          <div class="contact-strip">
+            <a href="mailto:darren.ng577@gmail.com">Email</a>
+            <a href="https://github.com/Darren322" target="_blank" rel="noreferrer">GitHub</a>
+            <a href="https://linkedin.com/in/darren-ng-yijie-190696288" target="_blank" rel="noreferrer">LinkedIn</a>
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <section class="boot-screen" id="bootScreen" aria-labelledby="bootTitle">
+      <div class="boot-grid" aria-hidden="true"></div>
+      <div class="boot-card">
+        <div class="boot-monogram" aria-hidden="true">
+          <span>DN</span>
+          <i></i>
+        </div>
+        <p class="eyebrow">Portfolio environment / Build 08.26</p>
+        <h2 id="bootTitle">Enter the<br /><em>Midnight Systems Lab.</em></h2>
+        <p class="boot-intro">
+          A compact, explorable map of Darren's engineering work—from production systems and AI workflows to teaching and mentorship.
+        </p>
+        <div class="boot-actions">
+          <button class="button button-primary button-large" type="button" data-action="enter-world">
+            Explore the lab
+            <span aria-hidden="true">→</span>
+          </button>
+          <button class="button button-quiet button-large" type="button" data-action="open-resume">
+            Skip to resume
+          </button>
+        </div>
+        <div class="boot-meta">
+          <span><i></i> Systems online</span>
+          <span>Singapore / GMT+8</span>
+          <span>Keyboard + touch</span>
+        </div>
+      </div>
+    </section>
+
+    <dialog class="intel-dialog" id="intelDialog" aria-labelledby="intelTitle">
+      <div class="dialog-shell">
+        <button class="icon-button dialog-close" type="button" data-action="close-intel" aria-label="Close details">×</button>
+        <div class="intel-index" id="intelIndex">NODE 00</div>
+        <div class="intel-content">
+          <p class="eyebrow" id="intelEyebrow">Identity atrium</p>
+          <h2 id="intelTitle">Darren Ng Yijie</h2>
+          <p class="intel-lede" id="intelLede"></p>
+          <div class="intel-items" id="intelItems"></div>
+          <div class="intel-tags" id="intelTags"></div>
+        </div>
+        <div class="dialog-footer">
+          <span id="intelFooter">Signal acquired</span>
+          <button class="button button-primary" type="button" data-action="next-node">Next node <span aria-hidden="true">→</span></button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog class="resume-dialog" id="quickResume" aria-labelledby="resumeTitle">
+      <div class="resume-shell">
+        <header class="resume-header">
+          <div>
+            <p class="eyebrow">Quick resume / Read mode</p>
+            <h2 id="resumeTitle">Darren Ng Yijie</h2>
+            <p>Software Engineering · Singapore</p>
+          </div>
+          <div class="resume-actions">
+            <a class="button button-quiet" href="assets/Darren_Ng_Resume_Aug.pdf" download>Download PDF</a>
+            <button class="icon-button" type="button" data-action="close-resume" aria-label="Close resume">×</button>
+          </div>
+        </header>
+        <div class="resume-contact">
+          <a href="mailto:darren.ng577@gmail.com">darren.ng577@gmail.com</a>
+          <a href="https://github.com/Darren322" target="_blank" rel="noreferrer">github.com/Darren322</a>
+          <a href="https://linkedin.com/in/darren-ng-yijie-190696288" target="_blank" rel="noreferrer">LinkedIn</a>
+        </div>
+        <div class="resume-body" id="resumeBody"></div>
+      </div>
+    </dialog>
+
+    <dialog class="help-dialog" id="helpDialog" aria-labelledby="helpTitle">
+      <div class="help-shell">
+        <button class="icon-button dialog-close" type="button" data-action="close-help" aria-label="Close controls">×</button>
+        <p class="eyebrow">Control manual</p>
+        <h2 id="helpTitle">Navigate your way.</h2>
+        <div class="help-grid">
+          <div><kbd>W A S D</kbd><span>Move avatar</span></div>
+          <div><kbd>↑ ↓ ← →</kbd><span>Move avatar</span></div>
+          <div><kbd>E / Enter</kbd><span>Inspect nearby node</span></div>
+          <div><kbd>R</kbd><span>Open quick resume</span></div>
+          <div><kbd>Esc</kbd><span>Close current panel</span></div>
+          <div><kbd>Click / Tap</kbd><span>Open any node directly</span></div>
+        </div>
+      </div>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
