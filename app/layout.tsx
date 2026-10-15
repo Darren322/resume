@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Bricolage_Grotesque, Caveat, JetBrains_Mono } from "next/font/google";
 import type { ReactNode } from "react";
+import { site, siteUrl } from "./site";
 import "../styles.css";
 
 // One characterful sans for all interface and headings; a hand for notes and tape.
@@ -10,9 +11,45 @@ const hand = Caveat({ subsets: ["latin"], variable: "--font-hand" });
 const code = JetBrains_Mono({ subsets: ["latin"], variable: "--font-code" });
 
 export const metadata: Metadata = {
-  title: "Darren Ng — Software Engineer",
-  description:
-    "Explore Darren Ng's software engineering work, projects, teaching, and technical skills in an interactive career studio.",
+  metadataBase: new URL(siteUrl),
+  title: site.title,
+  description: site.description,
+  applicationName: `${site.name} — Resume`,
+  authors: [{ name: site.fullName, url: siteUrl }],
+  creator: site.fullName,
+  keywords: [
+    "Darren Ng",
+    "Darren Ng Yijie",
+    "software engineer Singapore",
+    "SMU software engineering",
+    "full-stack developer",
+    "Next.js",
+    "Spring Boot",
+    "AWS",
+    "resume",
+    "portfolio",
+  ],
+  alternates: { canonical: "/" },
+  openGraph: {
+    type: "profile",
+    url: "/",
+    siteName: `${site.name} — Resume`,
+    title: site.title,
+    description: site.description,
+    locale: "en_SG",
+    firstName: "Darren",
+    lastName: "Ng",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: site.title,
+    description: site.description,
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: { index: true, follow: true, "max-image-preview": "large", "max-snippet": -1 },
+  },
 };
 
 export const viewport: Viewport = {

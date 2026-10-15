@@ -463,7 +463,7 @@ export function JourneyChapter({ nodeId, node, onClose, onNext }: CareerChapterP
         <div className="chapter-scroll-content">
           <header className="chapter-intro">
           <p className="eyebrow">{node.index} / {node.zone}</p>
-          <h1 id="intelTitle">{chapterTitle}</h1>
+          <h2 id="intelTitle" className="chapter-title">{chapterTitle}</h2>
           <p>{chapterIntro}</p>
           {config.selectionMode ? (
             <div className="journey-selector" role="tablist" aria-label={config.selectionMode === "projects" ? "Project artifacts" : config.selectionMode === "skills" ? "Skill categories" : `${node.label} records`}>

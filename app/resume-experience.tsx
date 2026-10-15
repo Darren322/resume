@@ -18,12 +18,7 @@ import { ItemMark, NodeMark, RecordMark, TechIcon, technologyMarkFor } from "./m
 import { ProjectShowcase } from "./project-showcase";
 import { JourneyChapter } from "./career-chapter";
 import { WorkstationHub } from "./workstation-hub";
-
-const externalLinks = {
-  email: "mailto:darren.ng577@gmail.com",
-  github: "https://github.com/Darren322",
-  linkedin: "https://linkedin.com/in/darren-ng-yijie-190696288",
-};
+import { profileLinks as externalLinks } from "./site";
 
 function useNativeDialog(open: boolean, ref: React.RefObject<HTMLDialogElement | null>) {
   useEffect(() => {

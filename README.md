@@ -30,6 +30,10 @@ Then open the URL printed by Next.js (normally `http://localhost:3000`). Use `np
 /Applications/Blender.app/Contents/MacOS/Blender --background --factory-startup --python scripts/generate_workstation.py
 ```
 
+## SEO
+
+Metadata, Open Graph image, `robots.txt`, `sitemap.xml` and Person JSON-LD are generated from `app/site.ts`. The canonical origin is `https://darrenyijie.dev`, set in `siteUrl`.
+
 All resume content is defined once in `app/resume-data.ts` and shared between the interactive world and Quick Resume mode.
 
 `app.js` and `index.html` are the original vanilla prototype, kept for reference only; the runnable site is the Next.js app in `app/`.
