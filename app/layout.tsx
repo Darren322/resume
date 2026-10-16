@@ -1,7 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Bricolage_Grotesque, Caveat, JetBrains_Mono } from "next/font/google";
 import type { ReactNode } from "react";
-import { site, siteUrl } from "./site";
+import { preload } from "react-dom";
+import { deskModels, fullDeskMedia, lightDeskMedia, site, siteUrl } from "./site";
 import "../styles.css";
 
 // One characterful sans for all interface and headings; a hand for notes and tape.
@@ -57,6 +58,9 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
+  // Start the desk download with the HTML; each device fetches only the variant it will load.
+  preload(deskModels.light, { as: "fetch", crossOrigin: "anonymous", media: lightDeskMedia });
+  preload(deskModels.full, { as: "fetch", crossOrigin: "anonymous", media: fullDeskMedia });
   return (
     <html lang="en" className={`${display.variable} ${hand.variable} ${code.variable}`}>
       <body>{children}</body>

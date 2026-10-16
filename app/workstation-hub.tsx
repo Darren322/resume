@@ -17,11 +17,11 @@ import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPa
 import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { renderToStaticMarkup } from "react-dom/server";
-import { FaGithub, FaSliders, FaXmark } from "react-icons/fa6";
+import { FaGithub, FaLaptop, FaSliders, FaXmark } from "react-icons/fa6";
 import { technologyIcon, technologyMarkFor } from "./marks";
 import { ObjectSurface, skillList, whereUsed, type SurfaceNode } from "./object-surfaces";
 import { resumeData, type ResumeItem } from "./resume-data";
-import { site, siteUrl } from "./site";
+import { deskModels, lightDeskMedia, site, siteUrl } from "./site";
 import { createWorkstationAudio, type WorkstationAudio } from "./workstation-audio";
 import { createDaylight, currentSgtHours, daylightAt, formatSgt, partOfDay, sgtDateLabel } from "./sgt-daylight";
 
@@ -77,9 +77,25 @@ const heldDecor: Record<string, string[]> = {
  * the desk is exactly what is in the hand. Screen readers still get the text.
  */
 const READ_IN_PLACE = new Set<SurfaceNode>(["profile", "skills", "teaching", "education", "projects"]);
+/**
+ * Landscape sheets an upright phone holds turned, long side down the screen,
+ * reprinted as portrait pages so they read the right way up and large.
+ */
+const TURNED_UPRIGHT = new Set(["projects", "education", "teaching"]);
+/**
+ * On an upright phone the laptop hands its page off to the iPhone, Handoff
+ * style: the phone is lifted instead and shows the work history, upright.
+ */
+const HANDOFF: Partial<Record<string, string>> = { work: "contact" };
+// How far a held page can be pinched in; phones need the most for wide sheets.
+const READING_MAX_ZOOM = 3.5;
 
 const FOV = 34;
 const DESK_CENTER = new THREE.Vector3(0, 1.64, 0.35);
+// Half the desk's width (with a little air) that a framing must be able to show.
+const DESK_HALF_WIDTH = 6.1;
+// Upright phones see this much either side of the view centre; swipe to see the rest.
+const PORTRAIT_HALF_VIEW = 2.1;
 const LAMP_AIM = new THREE.Vector3(-0.3, 1.64, 1.0);
 const LAMP_INTENSITY = 25;
 const INTRO_SECONDS = 2.4;
@@ -102,24 +118,30 @@ type PickupPhase = "idle" | "lifting" | "held" | "returning";
 type PickupState = { phase: PickupPhase; progress: number; targetId: string | null };
 
 /**
- * Frame the whole desk inside the part of the viewport UI leaves free.
- * Landscape looks down at 63°. Portrait phones roll the camera 90° and look
- * down more steeply, so the long side of the desk runs down the screen.
+ * Frame the desk inside the part of the viewport UI leaves free.
+ * Landscape fits the whole desk, looking down at 63°. Upright phones stay
+ * upright and show the middle of the desk at a readable size, looking down a
+ * little more steeply; a swipe pans along it and pinching out shows it all.
  */
 function cameraFraming(width: number, height: number, reserveTop: number, reserveBottom: number) {
   const aspect = width / Math.max(height, 1);
   const portrait = aspect < 0.82;
   const tanV = Math.tan(THREE.MathUtils.degToRad(FOV / 2));
   const freeShare = Math.max(0.45, (height - reserveTop - reserveBottom) / Math.max(height, 1));
-  const distance = portrait
-    ? Math.max(5.9 / (tanV * freeShare), 2.8 / (tanV * aspect))
-    : Math.max(6.1 / (tanV * aspect), 3.1 / (tanV * freeShare));
+  const depthFit = 3.1 / (tanV * freeShare);
+  const wholeDesk = Math.max(DESK_HALF_WIDTH / (tanV * aspect), depthFit);
+  const distance = portrait ? Math.max(PORTRAIT_HALF_VIEW / (tanV * aspect), depthFit) : wholeDesk;
   return {
     portrait,
-    elevation: THREE.MathUtils.degToRad(portrait ? 76 : 63),
+    elevation: THREE.MathUtils.degToRad(portrait ? 68 : 63),
     distance,
+    // Zoom factor at which the whole desk fits; pinch-out stops there.
+    maxZoom: Math.max(1.24, wholeDesk / distance),
+    // World units visible either side of centre at zoom 1.
+    halfView: distance * tanV * aspect,
     // Pixels the desk centre should sit below the viewport centre.
-    centreShiftPx: (reserveTop - reserveBottom) / 2,
+    // Upright, the monitor's height reads as the desk's top half; nudge it down to balance.
+    centreShiftPx: (reserveTop - reserveBottom) / 2 + (portrait ? height * 0.05 : 0),
   };
 }
 
@@ -327,15 +349,17 @@ function paintGrainNormal(size = 256) {
  * One handwritten notebook page: the teaching entry on blue ruling with a
  * margin. It is read on the 3D page itself, on the desk and in the hand.
  */
-function paintNotebookPage(item: ResumeItem | undefined, handFamily: string) {
-  const width = 820;
-  const height = 984; // the page's 0.75 x 0.9 proportions
+function paintNotebookPage(canvas: HTMLCanvasElement, item: ResumeItem | undefined, handFamily: string, upright = false, spineFirst = false) {
+  const pageWidth = 820;
+  const pageHeight = 984; // the page's 0.75 x 0.9 proportions
   const rule = 58;
-  const canvas = document.createElement("canvas");
-  canvas.width = width * 2;
-  canvas.height = height * 2; // drawn at 2x so it stays sharp when held up close
+  // Drawn at 2x so it stays sharp when held up close.
+  canvas.width = pageWidth * 2;
+  canvas.height = pageHeight * 2;
   const context = canvas.getContext("2d")!;
-  context.scale(2, 2);
+  context.setTransform(2, 0, 0, 2, 0, 0);
+  // Upright phones turn the notebook, so its pages stack and are written across.
+  const { width, height } = upright ? printUpright(context, canvas, pageWidth, pageHeight) : { width: pageWidth, height: pageHeight };
   context.fillStyle = "#e3dccd";
   context.fillRect(0, 0, width, height);
   context.fillStyle = "rgba(44, 79, 158, 0.22)";
@@ -346,7 +370,8 @@ function paintNotebookPage(item: ResumeItem | undefined, handFamily: string) {
 
   const left = 94;
   const maxWidth = width - left - 50;
-  let line = 1;
+  // Skip a rule where the spiral binding would cover the first line.
+  let line = spineFirst ? 2 : 1;
   const write = (text: string, size: number, weight: number, colour: string, gapAfter = 0) => {
     context.fillStyle = colour;
     context.font = `${weight} ${size}px ${handFamily}`;
@@ -371,6 +396,7 @@ function paintNotebookPage(item: ResumeItem | undefined, handFamily: string) {
   write(rest.join(" · "), 41, 500, "#2c4f9e");
   write(item.period ?? "", 41, 500, "#a8692a");
   item.bullets.forEach((bullet) => write(bullet, 41, 500, "#2c4f9e"));
+  context.setTransform(1, 0, 0, 1, 0, 0);
   return canvas;
 }
 
@@ -383,6 +409,18 @@ const githubMark = (() => {
   return path && viewBox ? { path: new Path2D(path), width: viewBox[2], height: viewBox[3] } : null;
 })();
 
+/**
+ * Print a portrait page onto a landscape sheet's texture, a quarter turn
+ * round, so it reads upright when an upright phone holds the sheet turned.
+ * Returns the portrait page's size in the same units as the sheet's.
+ */
+function printUpright(context: CanvasRenderingContext2D, canvas: HTMLCanvasElement, sheetWidth: number, sheetHeight: number) {
+  const sx = canvas.width / sheetWidth;
+  const sy = canvas.height / sheetHeight;
+  context.setTransform(0, sy, -sx, 0, sx * sheetWidth, 0);
+  return { width: sheetHeight, height: sheetWidth };
+}
+
 /** Where the repo link sits on a project brief, in 0–1 texture coordinates. */
 type LinkArea = { href: string; u0: number; v0: number; u1: number; v1: number };
 
@@ -393,17 +431,19 @@ type LinkArea = { href: string; u0: number; v0: number; u1: number; v1: number }
  * footer, and a folded corner that says the page turns. Text shrinks to fit,
  * so nothing ever collides. Returns where the repo link was printed.
  */
-function paintProjectSheet(canvas: HTMLCanvasElement, item: ResumeItem, page: number, total: number, fontFamily: string): LinkArea | null {
-  const width = 1378;
-  const height = 1000;
-  const margin = 96;
+function paintProjectSheet(canvas: HTMLCanvasElement, item: ResumeItem, page: number, total: number, fontFamily: string, upright = false): LinkArea | null {
+  const sheetWidth = 1378;
+  const sheetHeight = 1000;
+  const context = canvas.getContext("2d")!;
+  context.setTransform(canvas.width / sheetWidth, 0, 0, canvas.height / sheetHeight, 0, 0);
+  // Upright phones turn the sheet and read it as a portrait page, one column.
+  const { width, height } = upright ? printUpright(context, canvas, sheetWidth, sheetHeight) : { width: sheetWidth, height: sheetHeight };
+  const margin = upright ? 72 : 96;
   const ink = "#1b1d24";
   const body = "#33363f";
   const muted = "#6b6f78";
   const accent = "#1f3b7a";
   const warm = "#a8692a";
-  const context = canvas.getContext("2d")!;
-  context.setTransform(canvas.width / width, 0, 0, canvas.height / height, 0, 0);
   context.fillStyle = "#f4efe5";
   context.fillRect(0, 0, width, height);
   for (let index = 0; index < 1200; index += 1) {
@@ -443,17 +483,67 @@ function paintProjectSheet(canvas: HTMLCanvasElement, item: ResumeItem, page: nu
   context.fillRect(margin, 112, width - margin * 2, 2);
 
   // Title and stack line, full width.
-  let titleSize = 54;
+  let titleSize = upright ? 66 : 54;
   let titleLines = lines(item.title, titleSize, 750, width - margin * 2);
-  while (titleLines.length > 2 && titleSize > 36) titleLines = lines(item.title, (titleSize -= 2), 750, width - margin * 2);
+  while (titleLines.length > (upright ? 3 : 2) && titleSize > 36) titleLines = lines(item.title, (titleSize -= 2), 750, width - margin * 2);
   let y = 184;
   titleLines.forEach((text) => {
     draw(text, margin, y, titleSize, 750, ink);
     y += titleSize * 1.12;
   });
   const bodyTop = y + 20;
-  const bodyBottom = height - 190;
+  const bodyBottom = height - (upright ? 236 : 190);
 
+  if (upright) {
+    // One column: metric card, overview, then what was built, all scaled
+    // together until they fit above the footer.
+    const column = width - margin * 2;
+    const layout = (k: number, paint: boolean) => {
+      let at = bodyTop;
+      if (item.highlight) {
+        const valueSize = Math.round(96 * k);
+        const labelSize = Math.round(32 * k);
+        const labelLines = lines(item.highlight.label, labelSize, 500, column - 64);
+        const valueBase = at + 22 + valueSize * 0.86;
+        const cardHeight = valueBase - at + 14 + labelLines.length * labelSize * 1.3 + 22;
+        if (paint) {
+          context.fillStyle = "rgba(31, 59, 122, 0.07)";
+          context.fillRect(margin, at, column, cardHeight);
+          context.fillStyle = accent;
+          context.fillRect(margin, at, 6, cardHeight);
+          context.font = font(800, valueSize);
+          const fitted = Math.min(valueSize, Math.floor(valueSize * (column - 64) / context.measureText(item.highlight.value).width));
+          draw(item.highlight.value, margin + 32, valueBase, fitted, 800, accent);
+          labelLines.forEach((text, index) => draw(text, margin + 32, valueBase + 14 + (index + 1) * labelSize * 1.3 - labelSize * 0.3, labelSize, 500, body));
+        }
+        at += cardHeight + 44 * k;
+      }
+      const size = Math.round(38 * k);
+      if (item.showcase?.summary) {
+        if (paint) draw("OVERVIEW", margin, at + 20, 21, 700, warm);
+        at += 20 + 18;
+        lines(item.showcase.summary, size, 450, column).forEach((text) => {
+          at += size * 1.45;
+          if (paint) draw(text, margin, at, size, 450, body);
+        });
+        at += 40 * k;
+      }
+      if (paint) draw("WHAT I BUILT", margin, at + 20, 21, 700, warm);
+      at += 20 + 18;
+      item.bullets.forEach((bullet, index) => {
+        lines(bullet, size, 450, column - 60).forEach((text, line) => {
+          at += size * 1.45;
+          if (paint && line === 0) draw(String(index + 1).padStart(2, "0"), margin, at, size - 4, 700, warm);
+          if (paint) draw(text, margin + 60, at, size, 450, body);
+        });
+        at += 22 * k;
+      });
+      return at;
+    };
+    let k = 1;
+    while (k > 0.6 && layout(k, false) > bodyBottom) k -= 0.04;
+    layout(k, true);
+  } else {
   // Left column: metric card, then overview.
   const leftX = margin;
   const leftWidth = 520;
@@ -497,14 +587,37 @@ function paintProjectSheet(canvas: HTMLCanvasElement, item: ResumeItem, page: nu
     });
     rightY += 26;
   });
+  }
 
-  // Footer: the repo link right-aligned, stack tags filling the space before it.
+  // Footer: the repo link right-aligned, stack tags filling the space before
+  // it. Upright, the tags get their own row and the link sits beneath them.
   context.fillStyle = "rgba(27, 29, 36, 0.14)";
-  context.fillRect(margin, height - 150, width - margin * 2, 2);
-  const tagY = height - 108;
+  context.fillRect(margin, height - (upright ? 196 : 150), width - margin * 2, 2);
+  const tagY = height - (upright ? 140 : 108);
   let link: LinkArea | null = null;
   let tagLimit = width - margin;
-  if (item.repo) {
+  if (item.repo && upright) {
+    const label = item.repo.replace(/^https?:\/\//, "");
+    const linkY = height - 66;
+    let linkSize = 26;
+    context.font = font(650, linkSize);
+    while (context.measureText(label).width > width - margin * 2 - 170 && linkSize > 16) context.font = font(650, (linkSize -= 1));
+    const labelWidth = context.measureText(label).width;
+    context.fillStyle = ink;
+    if (githubMark) {
+      context.save();
+      context.translate(margin, linkY - 24);
+      context.scale(30 / githubMark.height, 30 / githubMark.height);
+      context.fill(githubMark.path);
+      context.restore();
+    }
+    draw(label, margin + 42, linkY, linkSize, 650, accent);
+    context.fillStyle = accent;
+    context.fillRect(margin + 42, linkY + 6, labelWidth, 2);
+    // Portrait (x, y) lands on the sheet at (1 - y / height, x / width).
+    const [x0, y0, x1, y1] = [margin - 10, linkY - 36, margin + 52 + labelWidth, linkY + 16];
+    link = { href: item.repo, u0: 1 - y1 / height, v0: x0 / width, u1: 1 - y0 / height, v1: x1 / width };
+  } else if (item.repo) {
     const label = item.repo.replace(/^https?:\/\//, "");
     let linkSize = 22;
     context.font = font(650, linkSize);
@@ -675,14 +788,13 @@ function paintKeyboardDisplay(side: "left" | "right", fontFamily: string) {
  * corner and the 3D wax seal sits bottom right. Deliberately no crest or
  * signature. Read on the 3D sheet itself, so it is drawn at 2x.
  */
-function paintCertificate(item: ResumeItem, displayFamily: string, handFamily: string) {
-  const width = 1400;
-  const height = 1000;
-  const canvas = document.createElement("canvas");
-  canvas.width = width * 2;
-  canvas.height = height * 2;
+function paintCertificate(canvas: HTMLCanvasElement, item: ResumeItem, displayFamily: string, handFamily: string, upright = false) {
+  const sheetWidth = 1400;
+  const sheetHeight = 1000;
   const context = canvas.getContext("2d")!;
-  context.scale(2, 2);
+  context.setTransform(canvas.width / sheetWidth, 0, 0, canvas.height / sheetHeight, 0, 0);
+  // Upright phones turn the certificate and read it in portrait.
+  const { width, height } = upright ? printUpright(context, canvas, sheetWidth, sheetHeight) : { width: sheetWidth, height: sheetHeight };
   context.fillStyle = "#f3eee3";
   context.fillRect(0, 0, width, height);
   // Double rule border in deep ink green.
@@ -694,8 +806,8 @@ function paintCertificate(item: ResumeItem, displayFamily: string, handFamily: s
 
   const honour = item.bullets.find((line) => / list/i.test(line)) ?? item.bullets.at(-1) ?? "";
   const [awardName, awardPeriod] = honour.split(" · ");
-  const left = 130;
-  const maxWidth = 760;
+  const left = upright ? 120 : 130;
+  const maxWidth = upright ? width - 240 : 760;
   const line = (text: string, y: number, weight: number, size: number, family: string, colour: string) => {
     if (!text) return;
     context.fillStyle = colour;
@@ -705,17 +817,16 @@ function paintCertificate(item: ResumeItem, displayFamily: string, handFamily: s
     context.fillText(text, left, y);
   };
   context.textBaseline = "alphabetic";
-  line("CERTIFICATE OF ACHIEVEMENT", 190, 700, 34, displayFamily, "#24493f");
-  line(awardName, 330, 750, 132, displayFamily, "#1b1d24");
-  line(awardPeriod ?? "", 400, 500, 42, displayFamily, "#3b3f4a");
-  line("Awarded to", 500, 500, 34, displayFamily, "#6b6f78");
-  line(resumeData.profile.items[0]?.title ?? "Darren Ng Yijie", 590, 700, 92, handFamily, "#2c4f9e");
-  line(item.subtitle?.split(" · ")[0] ?? "", 670, 600, 36, displayFamily, "#3b3f4a");
-  line(item.title, 718, 500, 34, displayFamily, "#3b3f4a");
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.flipY = false;
-  return texture;
+  // Upright, the same lines sit larger on the taller page, below the seal.
+  const at = (y: number) => (upright ? 420 + (y - 190) * 1.5 : y);
+  line("CERTIFICATE OF ACHIEVEMENT", at(190), 700, upright ? 40 : 34, displayFamily, "#24493f");
+  line(awardName, at(330), 750, upright ? 150 : 132, displayFamily, "#1b1d24");
+  line(awardPeriod ?? "", at(400), 500, upright ? 50 : 42, displayFamily, "#3b3f4a");
+  line("Awarded to", at(500), 500, upright ? 40 : 34, displayFamily, "#6b6f78");
+  line(resumeData.profile.items[0]?.title ?? "Darren Ng Yijie", at(590), 700, upright ? 104 : 92, handFamily, "#2c4f9e");
+  line(item.subtitle?.split(" · ")[0] ?? "", at(670), 600, upright ? 44 : 36, displayFamily, "#3b3f4a");
+  line(item.title, at(718), 500, upright ? 40 : 34, displayFamily, "#3b3f4a");
+  context.setTransform(1, 0, 0, 1, 0, 0);
 }
 
 /**
@@ -963,6 +1074,12 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
   const onReturnRef = useRef(onReturn);
   const zoomRef = useRef(1);
   const zoomTargetRef = useRef(1);
+  // Sideways pan along the desk on upright phones, in world units.
+  const panRef = useRef({ current: 0, target: 0 });
+  const [portraitView, setPortraitView] = useState(false);
+  const portraitRef = useRef(false);
+  // Set while the phone carries another object's content (see HANDOFF).
+  const [handoff, setHandoff] = useState(false);
   const introElapsedRef = useRef(0);
   const robotHopRef = useRef(-1);
   const audioRef = useRef<WorkstationAudio | null>(null);
@@ -1065,16 +1182,20 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
     selectedIdRef.current = hotspot.id;
     setActiveId(hotspot.id);
     setSelectedId(hotspot.id);
-    pickupRef.current = { phase: reduced ? "held" : "lifting", progress: reduced ? 1 : 0, targetId: hotspot.id };
-    readingRef.current = { scroll: -1e6, panX: -1e6, zoom: 1 };
+    // The object lifted; usually the one picked, unless it hands off to the phone.
+    const targetId = (portraitRef.current && HANDOFF[hotspot.id]) || hotspot.id;
+    setHandoff(targetId !== hotspot.id);
+    pickupRef.current = { phase: reduced ? "held" : "lifting", progress: reduced ? 1 : 0, targetId };
+    // The resume opens at its top-left corner; everything else opens centred.
+    readingRef.current = hotspot.id === "profile" ? { scroll: -1e6, panX: -1e6, zoom: 1 } : { scroll: 0, panX: 0, zoom: 1 };
     setFocusedSkill(null);
     audioRef.current?.rustle();
     onSelectionChangeRef.current?.({ id: hotspot.id, node: hotspot.node, label: hotspot.label, hint: hotspot.hint });
   }, []);
 
   const closeSelection = useCallback(() => {
-    const targetId = selectedIdRef.current;
-    if (!targetId || pickupRef.current.phase === "returning") return;
+    const targetId = pickupRef.current.targetId;
+    if (!selectedIdRef.current || !targetId || pickupRef.current.phase === "returning") return;
     audioRef.current?.rustle();
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (reduced) {
@@ -1083,6 +1204,7 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
       activeIdRef.current = null;
       setSelectedId(null);
       setActiveId(null);
+      setHandoff(false);
       onSelectionChangeRef.current?.(null);
       onReturnRef.current?.();
       return;
@@ -1105,8 +1227,8 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
           PageDown: () => { reading.scroll += 420; },
           PageUp: () => { reading.scroll -= 420; },
           " ": () => { reading.scroll += 420; },
-          "+": () => { reading.zoom = Math.min(2.6, reading.zoom * 1.2); },
-          "=": () => { reading.zoom = Math.min(2.6, reading.zoom * 1.2); },
+          "+": () => { reading.zoom = Math.min(READING_MAX_ZOOM, reading.zoom * 1.2); },
+          "=": () => { reading.zoom = Math.min(READING_MAX_ZOOM, reading.zoom * 1.2); },
           "-": () => { reading.zoom = Math.max(1, reading.zoom / 1.2); },
         };
         const step = steps[event.key];
@@ -1148,6 +1270,11 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
     }
 
     const isCoarse = window.matchMedia("(pointer: coarse)").matches;
+    // Phones get the light desk; low-memory or few-core machines also render cheaper.
+    const lightModel = window.matchMedia(lightDeskMedia).matches;
+    const hints = navigator as Navigator & { deviceMemory?: number };
+    const lowPower = lightModel || (hints.deviceMemory ?? 8) <= 4 || (navigator.hardwareConcurrency || 8) <= 4;
+    const maxAnisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), lowPower ? 4 : 16);
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     let seenIntro = false;
     try {
@@ -1171,8 +1298,7 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
     const lookTarget = new THREE.Vector3();
     const cameraRight = new THREE.Vector3();
     const cameraUp = new THREE.Vector3();
-    const portraitUp = new THREE.Vector3(-1, 0, 0);
-    const landscapeUp = new THREE.Vector3(0, 1, 0);
+    const worldUp = new THREE.Vector3(0, 1, 0);
     let framing = cameraFraming(1, 1, 0, 0);
     let viewport = { width: 1, height: 1, mobile: false };
 
@@ -1190,7 +1316,7 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
     lamp.position.set(-3.25, 4.15, -0.25);
     lamp.target.position.copy(LAMP_AIM);
     lamp.castShadow = true;
-    lamp.shadow.mapSize.set(isCoarse ? 1024 : 2048, isCoarse ? 1024 : 2048);
+    lamp.shadow.mapSize.set(lowPower ? 1024 : 2048, lowPower ? 1024 : 2048);
     lamp.shadow.camera.near = 0.4;
     lamp.shadow.camera.far = 14;
     lamp.shadow.bias = -0.0004;
@@ -1215,10 +1341,10 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
     // Post-processing: AO for contact shadows, light bloom on screens and the
     // bulb, then a vignette with fine grain. No tilt-shift: it blurs the
     // top-row objects people need to read.
-    const renderTarget = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
+    const renderTarget = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: lowPower ? 2 : 4 });
     const composer = new EffectComposer(renderer, renderTarget);
     composer.addPass(new RenderPass(scene, camera));
-    const useAo = !isCoarse;
+    const useAo = !lowPower;
     let gtao: GTAOPass | null = null;
     if (useAo) {
       gtao = new GTAOPass(scene, camera, 1, 1);
@@ -1233,6 +1359,14 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
     const finish = new ShaderPass(vignetteGrainShader);
     composer.addPass(finish);
 
+    // Sheets that are reprinted in portrait when an upright phone holds them turned.
+    const reprints: Array<(upright: boolean) => void> = [];
+    let printedUpright = false;
+    const reprint = (upright: boolean) => {
+      printedUpright = upright;
+      reprints.forEach((print) => print(upright));
+    };
+
     const resize = () => {
       const rect = root.getBoundingClientRect();
       const width = Math.max(rect.width, 1);
@@ -1242,10 +1376,15 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
       const dockHeight = dock && dock.offsetParent !== null ? dock.offsetHeight + 16 : 0;
       viewport = { width, height, mobile };
       framing = cameraFraming(width, height, mobile ? 64 : 76, mobile ? dockHeight + 44 : 72);
+      if (!framing.portrait) panRef.current.target = 0;
+      zoomTargetRef.current = Math.min(zoomTargetRef.current, framing.maxZoom);
+      setPortraitView(framing.portrait);
+      portraitRef.current = framing.portrait;
+      if (framing.portrait !== printedUpright) reprint(framing.portrait);
       fog.density = 0.022 * 12.5 / framing.distance;
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
-      const pixelRatio = Math.min(window.devicePixelRatio || 1, mobile ? 1.5 : 1.75);
+      const pixelRatio = Math.min(window.devicePixelRatio || 1, lowPower ? 1.5 : 1.75);
       renderer.setPixelRatio(pixelRatio);
       renderer.setSize(width, height, false);
       composer.setPixelRatio(pixelRatio);
@@ -1271,7 +1410,7 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
     const phoneTexture = new THREE.CanvasTexture(phoneCanvas);
     phoneTexture.colorSpace = THREE.SRGBColorSpace;
     phoneTexture.flipY = false;
-    phoneTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    phoneTexture.anisotropy = maxAnisotropy;
     ownedTextures.add(phoneTexture);
     let phoneFont = "sans-serif";
     /**
@@ -1502,7 +1641,7 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
         }
         texture.colorSpace = THREE.SRGBColorSpace;
         texture.flipY = false;
-        texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        texture.anisotropy = maxAnisotropy;
         ownedTextures.add(texture);
         const mesh = mountedModel?.getObjectByName(meshName);
         if (!(mesh instanceof THREE.Mesh)) return;
@@ -1565,7 +1704,7 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
       displayFamilyName ? document.fonts.load(`750 120px ${displayFamilyName}`) : Promise.resolve(),
     ]).catch(() => undefined);
     loader.load(
-      "/assets/workstation.glb",
+      lightModel ? deskModels.light : deskModels.full,
       async (gltf) => {
         await fontReady;
         if (disposed) return;
@@ -1620,7 +1759,7 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
           const tape = mountedModel!.getObjectByName(`hotspot-tag-${hotspot.id}`);
           if (!(tape instanceof THREE.Mesh)) return;
           const texture = paintTape(hotspot.label, tapeFont);
-          texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+          texture.anisotropy = maxAnisotropy;
           ownedTextures.add(texture);
           ownMaterial(tape, new THREE.MeshStandardMaterial({ map: texture, color: "#d9d2c6", alphaTest: 0.5, roughness: 0.92, side: THREE.DoubleSide }));
           tape.castShadow = false;
@@ -1647,7 +1786,7 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
             const Icon = mark ? technologyIcon(mark) : undefined;
             const logoSvg = Icon ? renderToStaticMarkup(<Icon color="#052a38" size={256} />) : undefined;
             const texture = paintKeycap(skill, box.x / box.z, uiFamily, logoSvg);
-            texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+            texture.anisotropy = maxAnisotropy;
             ownedTextures.add(texture);
             ownMaterial(cap.mesh, new THREE.MeshStandardMaterial({ map: texture, roughness: 0.42, emissive: "#f2b66d", emissiveIntensity: 0 }));
             cap.mesh.userData.skill = skill;
@@ -1665,7 +1804,7 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
         // notebook and folder is near pure white, so it is toned to the same
         // warm off-white and never clips under the lamp.
         const paperGrain = paintPaper(false);
-        paperGrain.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        paperGrain.anisotropy = maxAnisotropy;
         ownedTextures.add(paperGrain);
         const paperMaterials = new Set<THREE.MeshStandardMaterial>();
         const scannedPaper = new Set<THREE.MeshStandardMaterial>();
@@ -1695,15 +1834,23 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
           material.color.set("#c9c2b6");
           material.roughness = Math.max(material.roughness, 0.85);
         });
-        // Handwritten teaching notes on the notebook's two pages.
+        // Handwritten teaching notes on the notebook's two pages. Turned on an
+        // upright phone, the right-hand page is on top, so it carries the first entry.
         (["left", "right"] as const).forEach((side, index) => {
           const page = mountedModel!.getObjectByName(`notebook-notes-${side}`);
           if (!(page instanceof THREE.Mesh)) return;
-          const texture = new THREE.CanvasTexture(paintNotebookPage(resumeData.teaching.items[index], tapeFont));
+          const canvas = document.createElement("canvas");
+          const texture = new THREE.CanvasTexture(canvas);
           texture.colorSpace = THREE.SRGBColorSpace;
           texture.flipY = false;
-          texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+          texture.anisotropy = maxAnisotropy;
           ownedTextures.add(texture);
+          const print = (upright: boolean) => {
+            paintNotebookPage(canvas, resumeData.teaching.items[upright ? 1 - index : index], tapeFont, upright, upright && side === "left");
+            texture.needsUpdate = true;
+          };
+          print(printedUpright);
+          reprints.push(print);
           ownMaterial(page, new THREE.MeshStandardMaterial({ map: texture, color: "#d4cdc0", roughness: 0.9 }));
         });
 
@@ -1735,19 +1882,21 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
           const projects = resumeData.projects.items;
           const briefFamily = getComputedStyle(document.documentElement).getPropertyValue("--font-display").trim() || "sans-serif";
           const briefCanvas = document.createElement("canvas");
-          briefCanvas.width = 2756;
-          briefCanvas.height = 2000;
+          // Printed at 2x for desktop close-ups; phones have fewer pixels to fill.
+          briefCanvas.width = lightModel ? 1722 : 2756;
+          briefCanvas.height = lightModel ? 1250 : 2000;
           const briefTexture = new THREE.CanvasTexture(briefCanvas);
           briefTexture.colorSpace = THREE.SRGBColorSpace;
           briefTexture.flipY = false;
-          briefTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+          briefTexture.anisotropy = maxAnisotropy;
           ownedTextures.add(briefTexture);
           let page = 0;
           const paintPage = () => {
-            projectLink = paintProjectSheet(briefCanvas, projects[page], page, projects.length, briefFamily);
+            projectLink = paintProjectSheet(briefCanvas, projects[page], page, projects.length, briefFamily, printedUpright);
             briefTexture.needsUpdate = true;
           };
           paintPage();
+          reprints.push(paintPage);
           ownMaterial(brief, new THREE.MeshStandardMaterial({ map: briefTexture, color: "#d4cdc0", roughness: 0.9 }));
           turnProjectRef.current = (step) => {
             // Snapshot the page being turned, then print the next one underneath.
@@ -1767,7 +1916,7 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
           const panel = mountedModel!.getObjectByName(`keyboard-display-${side}`);
           if (!(panel instanceof THREE.Mesh)) return;
           const texture = paintKeyboardDisplay(side, getComputedStyle(document.documentElement).getPropertyValue("--font-display").trim() || "sans-serif");
-          texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+          texture.anisotropy = maxAnisotropy;
           ownedTextures.add(texture);
           // Reflective panel: lit by the room, with a faint front light for night.
           ownMaterial(panel, new THREE.MeshStandardMaterial({ map: texture, roughness: 0.45, emissive: "#ffffff", emissiveMap: texture, emissiveIntensity: 0.12 }));
@@ -1780,8 +1929,19 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
         resumeData.education.items.forEach((item, index) => {
           const face = mountedModel!.getObjectByName(index === 0 ? "education-certificate-face" : `education-certificate-face-${index + 1}`);
           if (!(face instanceof THREE.Mesh)) return;
-          const texture = paintCertificate(item, certificateFamily, tapeFont);
-          texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+          const canvas = document.createElement("canvas");
+          canvas.width = lightModel ? 1960 : 2800;
+          canvas.height = lightModel ? 1400 : 2000;
+          const texture = new THREE.CanvasTexture(canvas);
+          texture.colorSpace = THREE.SRGBColorSpace;
+          texture.flipY = false;
+          texture.anisotropy = maxAnisotropy;
+          const print = (upright: boolean) => {
+            paintCertificate(canvas, item, certificateFamily, tapeFont, upright);
+            texture.needsUpdate = true;
+          };
+          print(printedUpright);
+          reprints.push(print);
           ownedTextures.add(texture);
           certificateTextures.push(texture);
           // Off-white like the resume, so the lamp never clips the sheet.
@@ -1870,7 +2030,7 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
         const monitorScreen = mountedModel.getObjectByName("monitor-portfolio-screen");
         if (monitorScreen instanceof THREE.Mesh) {
           const screenTexture = paintWallpaper(getComputedStyle(document.documentElement).getPropertyValue("--font-display").trim() || "sans-serif");
-          screenTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+          screenTexture.anisotropy = maxAnisotropy;
           ownedTextures.add(screenTexture);
           monitorMaterial = ownMaterial(monitorScreen, new THREE.MeshBasicMaterial({ map: screenTexture, side: THREE.DoubleSide }));
         }
@@ -1911,16 +2071,26 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
       return null;
     };
 
-    const isReading = () => selectedIdRef.current === "profile" && pickupRef.current.phase === "held";
-    const drag = { active: false, moved: false, x: 0, y: 0, scroll: 0, panX: 0 };
+    // Held pages that pinch-zoom and drag: the resume always, and on an upright
+    // phone every object whose content is printed on it.
+    const readsInHand = (id: string | null) => id === "profile" || (framing.portrait && READ_IN_PLACE.has(id as SurfaceNode));
+    const isReading = () => readsInHand(selectedIdRef.current) && pickupRef.current.phase === "held";
+    // One-finger drags slide the held resume page, or pan along the desk on an upright phone.
+    const drag = { active: false, mode: "read" as "read" | "pan", moved: false, x: 0, y: 0, scroll: 0, panX: 0 };
 
     const onPointerMove = (event: PointerEvent) => {
       if (drag.active && touchPoints.size < 2) {
         const dx = event.clientX - drag.x;
         const dy = event.clientY - drag.y;
         if (Math.abs(dx) + Math.abs(dy) > 6) drag.moved = true;
-        readingRef.current.scroll = drag.scroll - dy;
-        readingRef.current.panX = drag.panX - dx;
+        if (drag.mode === "pan") {
+          // The desk follows the finger.
+          const worldPerPx = (2 * framing.halfView * zoomRef.current) / Math.max(viewport.width, 1);
+          panRef.current.target = drag.panX - dx * worldPerPx;
+        } else {
+          readingRef.current.scroll = drag.scroll - dy;
+          readingRef.current.panX = drag.panX - dx;
+        }
         if (event.cancelable) event.preventDefault();
       }
       if (event.pointerType === "touch") {
@@ -1935,9 +2105,9 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
           // Spreading fingers zooms in; pinching them together zooms out.
           // There is deliberately no pan/orbit gesture in this workspace.
           if (isReading()) {
-            readingRef.current.zoom = THREE.MathUtils.clamp(readingRef.current.zoom * (nextDistance / pinchDistance), 1, 2.6);
+            readingRef.current.zoom = THREE.MathUtils.clamp(readingRef.current.zoom * (nextDistance / pinchDistance), 1, READING_MAX_ZOOM);
           } else {
-            zoomTargetRef.current = THREE.MathUtils.clamp(zoomTargetRef.current - (nextDistance - pinchDistance) * 0.0012, 0.78, 1.24);
+            zoomTargetRef.current = THREE.MathUtils.clamp(zoomTargetRef.current - (nextDistance - pinchDistance) * 0.0012 * framing.maxZoom, 0.78, framing.maxZoom);
           }
           if (event.cancelable) event.preventDefault();
         }
@@ -1963,11 +2133,19 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
       if (introElapsedRef.current < INTRO_SECONDS) skipIntro();
       if (isReading() && !insideSurface(event.target)) {
         drag.active = true;
+        drag.mode = "read";
         drag.moved = false;
         drag.x = event.clientX;
         drag.y = event.clientY;
         drag.scroll = readingRef.current.scroll;
         drag.panX = readingRef.current.panX;
+      } else if (framing.portrait && !selectedIdRef.current && event.isPrimary && event.target === canvas) {
+        drag.active = true;
+        drag.mode = "pan";
+        drag.moved = false;
+        drag.x = event.clientX;
+        drag.y = event.clientY;
+        drag.panX = panRef.current.target;
       }
       if (event.pointerType !== "touch" || insideSurface(event.target)) return;
       touchPoints.set(event.pointerId, { x: event.clientX, y: event.clientY });
@@ -1987,7 +2165,7 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
       if (isReading()) {
         // Scroll slides the paper; ctrl/⌘-scroll (and trackpad pinch) zooms it.
         const reading = readingRef.current;
-        if (event.ctrlKey || event.metaKey) reading.zoom = THREE.MathUtils.clamp(reading.zoom * Math.exp(-event.deltaY * multiplier * 0.01), 1, 2.6);
+        if (event.ctrlKey || event.metaKey) reading.zoom = THREE.MathUtils.clamp(reading.zoom * Math.exp(-event.deltaY * multiplier * 0.01), 1, READING_MAX_ZOOM);
         else {
           reading.scroll += event.deltaY * multiplier;
           reading.panX += event.deltaX * multiplier;
@@ -1998,7 +2176,7 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
       // Let the held artifact's content scroll natively.
       if (event.deltaY === 0 || insideSurface(event.target)) return;
       const delta = THREE.MathUtils.clamp(event.deltaY * multiplier, -140, 140);
-      zoomTargetRef.current = THREE.MathUtils.clamp(zoomTargetRef.current + delta * 0.0012, 0.78, 1.24);
+      zoomTargetRef.current = THREE.MathUtils.clamp(zoomTargetRef.current + delta * 0.0012, 0.78, framing.maxZoom);
       if (event.cancelable) event.preventDefault();
     };
     const onPointerLeave = () => {
@@ -2039,7 +2217,7 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
       if (selectedIdRef.current) {
         // Clicking the background puts the artifact back; clicking another
         // object puts this one back and then picks that one up.
-        if (hit && hit !== "robot" && hit.id === selectedIdRef.current) return;
+        if (hit && hit !== "robot" && (hit.id === selectedIdRef.current || hit.id === pickupRef.current.targetId)) return;
         pendingPickRef.current = hit && hit !== "robot" ? hit : null;
         closeSelection();
         return;
@@ -2058,6 +2236,22 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
     root.addEventListener("pointerleave", onPointerLeave, { passive: true });
     root.addEventListener("wheel", onWheel, { passive: false });
     canvas.addEventListener("click", onCanvasClick);
+    // Safari pinch-zooms the page from gesture events even when the pinch is
+    // handled here; zooming the page re-rasterises the WebGL layer and can
+    // run a phone out of memory.
+    const onGesture = (event: Event) => event.preventDefault();
+    root.addEventListener("gesturestart", onGesture);
+    root.addEventListener("gesturechange", onGesture);
+    // If the GPU drops the context anyway, show the fallback instead of a frozen frame.
+    let contextLost = false;
+    const onContextLost = (event: Event) => {
+      event.preventDefault();
+      contextLost = true;
+      window.cancelAnimationFrame(frame);
+      frame = 0;
+      setStatus("fallback");
+    };
+    canvas.addEventListener("webglcontextlost", onContextLost);
 
     resize();
 
@@ -2081,6 +2275,8 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
     const headWorld = new THREE.Vector3();
     const anchorWorld = new THREE.Vector3();
     const anchorPositions = new Map<string, string>();
+    // The dock tape for the object nearest the middle of an upright phone's view.
+    let inViewId: string | null = null;
 
     let visible = true;
     let frame = 0;
@@ -2125,7 +2321,7 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
       zoomRef.current += (zoomTargetRef.current - zoomRef.current) * (reduced ? 1 : Math.min(1, dt * 9));
       const distance = framing.distance * zoomRef.current * (1 + 0.12 * (1 - introEase));
       const { elevation } = framing;
-      camera.up.copy(framing.portrait ? portraitUp : landscapeUp);
+      camera.up.copy(worldUp);
       cameraBase.set(0, Math.sin(elevation), Math.cos(elevation)).multiplyScalar(distance).add(DESK_CENTER);
       camera.position.copy(cameraBase);
       camera.lookAt(DESK_CENTER);
@@ -2136,6 +2332,13 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
       const worldPerPixel = (2 * distance * tanV) / viewport.height;
       lookTarget.copy(DESK_CENTER).addScaledVector(cameraUp, framing.centreShiftPx * worldPerPixel);
       cameraBase.addScaledVector(cameraUp, framing.centreShiftPx * worldPerPixel);
+      // Pan along the desk, never past its ends at the current zoom.
+      const pan = panRef.current;
+      const maxPan = Math.max(0, DESK_HALF_WIDTH - framing.halfView * zoomRef.current);
+      pan.target = THREE.MathUtils.clamp(pan.target, -maxPan, maxPan);
+      pan.current += (pan.target - pan.current) * (reduced ? 1 : Math.min(1, dt * 12));
+      lookTarget.addScaledVector(cameraRight, pan.current);
+      cameraBase.addScaledVector(cameraRight, pan.current);
       camera.position.copy(cameraBase);
       if (!reduced && pickup.phase === "idle") {
         if (viewport.mobile || isCoarse) {
@@ -2169,8 +2372,9 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
           const bottom = height - (mobile ? 70 : 84);
           const freeWidth = Math.max(width - 32, 80);
           const freeHeight = Math.max(bottom - top, 80);
-          // On a portrait phone, turn landscape surfaces so their long side runs down the screen.
-          const turned = surface.width > surface.height && height > width;
+          // Objects are held as they sit on the desk, except landscape ones on
+          // an upright phone: those turn, and their content is portrait to match.
+          const turned = framing.portrait && TURNED_UPRIGHT.has(id);
           screenRight.copy(turned ? surface.up : surface.right).multiplyScalar(turned ? -1 : 1);
           screenUp.copy(turned ? surface.right : surface.up);
           const spanX = turned ? surface.height : surface.width;
@@ -2182,16 +2386,20 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
           );
           let offsetX = 0;
           let offsetY = 0;
-          if (id === "profile") {
+          if (readsInHand(id)) {
             // Reading distance: the page spans a comfortable reading width, so
             // its own printed text is legible; scroll/drag slides it, pinch zooms.
             const reading = readingRef.current;
-            // Phones read at a minimum 600px page width (pan to see the rest).
-            const readingWidth = (mobile ? Math.max(width - 12, 600) : Math.min(freeWidth, 860)) * reading.zoom;
-            holdDistance = Math.max(0.25, (surface.width * height) / (2 * tanV * readingWidth));
+            const profile = id === "profile";
+            // Phones read the resume at a minimum 600px page width (pan to see
+            // the rest); other pages open whole and are pinched in to read.
+            const fitWidth = Math.min(freeWidth, (freeHeight * spanX) / spanY) * 0.96;
+            const readingWidth = (profile ? (mobile ? Math.max(width - 12, 600) : Math.min(freeWidth, 860)) : fitWidth) * reading.zoom;
+            holdDistance = Math.max(0.25, (spanX * height) / (2 * tanV * readingWidth));
             const worldPerPx = (2 * holdDistance * tanV) / height;
-            const maxScroll = Math.max(0, (surface.height / worldPerPx - freeHeight) / 2 + 16);
-            const maxPan = Math.max(0, (surface.width / worldPerPx - freeWidth) / 2 + 16);
+            const margin = profile ? 16 : 0;
+            const maxScroll = Math.max(0, (spanY / worldPerPx - freeHeight) / 2 + margin);
+            const maxPan = Math.max(0, (spanX / worldPerPx - freeWidth) / 2 + margin);
             reading.scroll = THREE.MathUtils.clamp(reading.scroll, -maxScroll, maxScroll);
             reading.panX = THREE.MathUtils.clamp(reading.panX, -maxPan, maxPan);
             offsetX = -reading.panX * worldPerPx;
@@ -2234,6 +2442,7 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
           activeIdRef.current = null;
           setSelectedId(null);
           setActiveId(null);
+          setHandoff(false);
           if (returnedId) onSelectionChangeRef.current?.(null);
           onReturnRef.current?.();
           const pending = pendingPickRef.current;
@@ -2420,12 +2629,19 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
       }
 
       // Keyboard/screen-reader anchors follow the tape labels on screen.
+      let nearestId: string | null = null;
+      let nearestGap = Infinity;
       hotspots.forEach((hotspot) => {
         const element = anchorRefs.current.get(hotspot.id);
         const tape = mountedModel?.getObjectByName(`hotspot-tag-${hotspot.id}`);
         if (!element || !tape) return;
         tape.getWorldPosition(anchorWorld).project(camera);
         const x = Math.round((anchorWorld.x * 0.5 + 0.5) * viewport.width);
+        const gap = Math.abs(x - viewport.width / 2);
+        if (gap < nearestGap) {
+          nearestGap = gap;
+          nearestId = hotspot.id;
+        }
         const y = Math.round((-anchorWorld.y * 0.5 + 0.5) * viewport.height);
         const next = `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%)`;
         if (anchorPositions.get(hotspot.id) !== next) {
@@ -2434,12 +2650,25 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
         }
       });
 
+      // Light the matching dock tape as the desk pans, and keep it on the rail.
+      const nextInView = framing.portrait ? nearestId : null;
+      if (nextInView !== inViewId) {
+        const dock = dockRef.current;
+        dock?.querySelector(`[data-in-view]`)?.removeAttribute("data-in-view");
+        const tapeButton = nextInView ? dock?.querySelector<HTMLElement>(`[data-hotspot="${nextInView}"]`) : null;
+        if (tapeButton) {
+          tapeButton.dataset.inView = "";
+          tapeButton.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "nearest", inline: "nearest" });
+        }
+        inViewId = nextInView;
+      }
+
       composer.render(dt);
       frame = window.requestAnimationFrame(render);
     };
 
     const startLoop = () => {
-      if (!frame && visible) {
+      if (!frame && visible && !contextLost) {
         lastTime = performance.now();
         frame = window.requestAnimationFrame(render);
       }
@@ -2476,6 +2705,9 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
       root.removeEventListener("pointerleave", onPointerLeave);
       root.removeEventListener("wheel", onWheel);
       canvas.removeEventListener("click", onCanvasClick);
+      root.removeEventListener("gesturestart", onGesture);
+      root.removeEventListener("gesturechange", onGesture);
+      canvas.removeEventListener("webglcontextlost", onContextLost);
       scene.traverse((object) => {
         if (object instanceof THREE.Mesh || object instanceof THREE.Points) {
           object.geometry.dispose();
@@ -2497,8 +2729,10 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
     // Reset both values so reduced-motion users get an immediate reset while
     // the regular path eases back to the authored whole-desk framing.
     zoomTargetRef.current = 1;
+    panRef.current.target = 0;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       zoomRef.current = 1;
+      panRef.current.current = 0;
     }
   }, []);
 
@@ -2514,17 +2748,24 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
   const statusCopy = selectedHotspot?.id === "skills"
     ? focusedSkill
       ? `${focusedSkill}${skillUse.length ? `: used at ${skillUse.join(", ")}` : ": part of my everyday toolkit"}`
+      : portraitView ? "Tap a key to see where I used it · pinch to zoom"
       : touchFirst ? "Tap a key to see where I used it" : "Point at a key to see where I used it"
     : selectedHotspot?.id === "profile"
     ? "Scroll to read, pinch to zoom"
     : selectedHotspot?.id === "projects"
-    ? "Click the page or use ← → to turn it · click outside to put it back"
+    ? portraitView ? "Tap the page to turn it · pinch to zoom" : "Click the page or use ← → to turn it · click outside to put it back"
     : selectedHotspot?.id === "education"
-    ? "Click the certificate or use ← → to see the other one"
+    ? portraitView ? "Tap to see the other certificate · pinch to zoom" : "Click the certificate or use ← → to see the other one"
+    : selectedHotspot?.id === "teaching" && portraitView
+    ? "Pinch to zoom, drag to look around"
+    : handoff
+    ? "Handed off from the laptop · tap outside to put it back"
     : selectedHotspot
     ? `${selectedHotspot.label} in hand · click outside to put it back`
     : activeHotspot
       ? `${activeHotspot.label} · ${activeHotspot.hint}`
+      : portraitView
+        ? "Swipe along the desk · tap an object to pick it up"
       : touchFirst
         ? "Start with the resume, work or projects — tap to pick up"
         : "Start with the resume, work or projects — click to pick up";
@@ -2603,6 +2844,8 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
         <nav className="workstation-mobile-destinations" ref={dockRef} aria-label="Desk sections">
           {hotspots.map((hotspot) => (
             <button
+              className="workstation-dock-tape"
+              data-hotspot={hotspot.id}
               disabled={Boolean(selectedId)}
               key={`dock-${hotspot.id}`}
               type="button"
@@ -2629,11 +2872,19 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
           sizes and positions it to the surface's on-screen rectangle. */}
       <div
         className="workstation-surface"
-        data-skin={selectedHotspot?.skin ?? "paper"}
+        data-skin={handoff ? "phone" : selectedHotspot?.skin ?? "paper"}
+        data-handoff={handoff ? "" : undefined}
         data-visible="false"
         ref={surfaceRef}
       >
-        {selectedHotspot && !READ_IN_PLACE.has(selectedHotspot.node) ? <ObjectSurface node={selectedHotspot.node} onClose={closeSelection} /> : null}
+        {selectedHotspot && !READ_IN_PLACE.has(selectedHotspot.node) ? (
+          handoff ? (
+            <div className="workstation-handoff">
+              <p className="workstation-handoff-banner"><FaLaptop aria-hidden="true" /> Continued from MacBook</p>
+              <ObjectSurface node={selectedHotspot.node} onClose={closeSelection} />
+            </div>
+          ) : <ObjectSurface node={selectedHotspot.node} onClose={closeSelection} />
+        ) : null}
       </div>
       {/* The resume and keyboard are read on the 3D objects themselves; screen readers get the text. */}
       {selectedHotspot && READ_IN_PLACE.has(selectedHotspot.node) ? (

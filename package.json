@@ -9,7 +9,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "npm run typecheck",
     "build:desk": "/Applications/Blender.app/Contents/MacOS/Blender --background --python scripts/generate_workstation.py && npm run optimize:desk",
-    "optimize:desk": "gltf-transform optimize model-sources/workstation.raw.glb public/assets/workstation.glb --compress meshopt --texture-compress webp --texture-size 2048 --simplify false --join false --flatten false --instance false --palette false --prune-attributes false"
+    "optimize:desk": "npm run optimize:desk:full && npm run optimize:desk:light",
+    "optimize:desk:full": "gltf-transform optimize model-sources/workstation.raw.glb public/assets/workstation.glb --compress meshopt --texture-compress webp --texture-size 2048 --simplify false --join false --flatten false --instance false --palette false --prune-attributes false",
+    "optimize:desk:light": "gltf-transform optimize model-sources/workstation.raw.glb public/assets/workstation-mobile.glb --compress meshopt --texture-compress webp --texture-size 1024 --simplify false --join false --flatten false --instance false --palette false --prune-attributes false"
   },
   "dependencies": {
     "@types/three": "^0.185.4",

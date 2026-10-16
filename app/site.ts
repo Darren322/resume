@@ -31,3 +31,14 @@ export const modelCredits = [
   { object: "Notebook", title: "Notebook", author: "demagdev", url: "https://sketchfab.com/3d-models/b58d334fb340449589e1efb9dc3e6119" },
   { object: "Graduation cap", title: "Graduation Cap (With Textures)", author: "Safina Irani", url: "https://sketchfab.com/3d-models/2e86ede4261e41c4a8f0f14248b73a70" },
 ];
+
+/**
+ * Phones and small screens load the desk with 1024px textures (about a quarter
+ * of the GPU memory); mobile Safari kills the tab when the full set is resident.
+ */
+export const lightDeskMedia = "(pointer: coarse), (max-width: 720px)";
+export const fullDeskMedia = "not ((pointer: coarse) or (max-width: 720px))";
+export const deskModels = {
+  full: "/assets/workstation.glb",
+  light: "/assets/workstation-mobile.glb",
+};

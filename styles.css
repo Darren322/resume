@@ -134,23 +134,29 @@ a {
   appearance: none;
 }
 
-.brand-button:hover .brand-mark {
-  border-color: var(--cyan);
-  background: rgba(var(--cyan-rgb), 0.13);
-}
-
+/* The monogram is a strip of the same masking tape that labels the desk. */
 .brand-mark {
   display: grid;
-  width: 38px;
-  height: 38px;
+  width: 46px;
+  height: 32px;
   place-items: center;
-  border: 1px solid rgba(var(--cyan-rgb), 0.4);
-  border-radius: 9px;
-  color: var(--cyan);
-  background: rgba(var(--cyan-rgb), 0.08);
-  box-shadow: inset 0 0 18px rgba(var(--cyan-rgb), 0.08);
-  font: 700 12px/1 var(--mono);
-  letter-spacing: -0.06em;
+  padding-top: 2px;
+  color: #2b211b;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.2), transparent 45%, rgba(80, 55, 30, 0.14)),
+    #d9c9a6;
+  clip-path: polygon(0 6%, 5% 0, 94% 4%, 100% 0, 97% 30%, 100% 58%, 96% 82%, 100% 100%, 4% 96%, 0 100%, 3% 70%, 0 40%);
+  filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.45));
+  font: 700 23px/1 var(--hand);
+  letter-spacing: 0.02em;
+  transform: rotate(-4deg);
+  transition: transform 220ms var(--ease), background-color 220ms var(--ease);
+}
+
+.brand-button:hover .brand-mark,
+.brand-button:focus-visible .brand-mark {
+  background-color: #e6d7b5;
+  transform: rotate(-1deg);
 }
 
 .brand-copy {
@@ -4099,6 +4105,11 @@ body {
 
 .workstation-hub { min-height: 100dvh; }
 
+/* The desk handles its own pinch: page zoom over the WebGL canvas can exhaust
+   a phone's memory. Held content still scrolls natively. */
+.landing-focus { touch-action: none; }
+.workstation-surface { touch-action: pan-x pan-y; }
+
 .workstation-mobile-destinations { display: none; }
 
 @media (max-width: 720px) {
@@ -5064,6 +5075,13 @@ body { font-family: var(--font-ui); }
 @container surface (max-width: 560px) {
   .obj-browser[data-sidebar="closed"] .obj-laptop-body { grid-template-columns: 1fr; }
   .obj-laptop-rail { padding: 4px 8px; border-right: 0; border-bottom: 1px solid #1e2024; }
+  /* A phone-sized screen keeps one row of chrome: the tabs already switch
+     employers, so the address bar goes and the bookmarks toggle joins the tabs. */
+  .obj-browser { position: relative; }
+  .obj-browser-toolbar { display: none; }
+  .obj-browser-tabs { padding: 6px 40px 0 8px; }
+  .obj-window-lights { padding-bottom: 10px; }
+  .obj-laptop-rail { position: absolute; top: 4px; right: 6px; padding: 0; border: 0; background: none; }
 }
 
 /* Phone → a Pro Max–style home screen. Corner radius matches the 3D glass. */
@@ -5171,3 +5189,107 @@ body { font-family: var(--font-ui); }
 .model-credits ul { margin: 10px 0 0; padding-left: 16px; line-height: 1.7; }
 .model-credits a { color: var(--text); text-decoration-color: rgba(242, 182, 109, 0.4); text-underline-offset: 3px; }
 .model-credits a:hover { color: var(--lamp); }
+
+/* Phone dock: one rail of masking tape, torn from the same roll as the
+   labels on the desk. It swipes sideways like the desk does, and the tape for
+   whatever sits mid-view catches the lamp light. */
+@media (max-width: 720px) {
+  .midnight .workstation-mobile-destinations {
+    right: 0;
+    bottom: 0;
+    left: 0;
+    display: flex;
+    gap: 12px;
+    padding: 18px 20px max(14px, env(safe-area-inset-bottom));
+    overflow-x: auto;
+    border: 0;
+    border-radius: 0;
+    background: linear-gradient(to top, rgba(4, 6, 11, 0.92) 30%, rgba(4, 6, 11, 0));
+    box-shadow: none;
+    backdrop-filter: none;
+    scroll-snap-type: x proximity;
+    scroll-padding-inline: 20px;
+    scrollbar-width: none;
+    touch-action: pan-x;
+    mask-image: linear-gradient(to right, transparent, #000 20px, #000 calc(100% - 28px), transparent);
+  }
+  .midnight .workstation-mobile-destinations::-webkit-scrollbar { display: none; }
+  .midnight .workstation-mobile-destinations .workstation-dock-tape {
+    flex: none;
+    min-height: 44px;
+    padding: 2px 18px 0;
+    border: 0;
+    border-radius: 0;
+    color: #2b211b;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.18), transparent 40%, rgba(80, 55, 30, 0.12)),
+      #d9c9a6;
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.5);
+    /* Torn ends, like tape ripped off the roll. */
+    clip-path: polygon(0 4%, 4% 0, 96% 3%, 100% 0, 98% 22%, 100% 46%, 97% 70%, 100% 100%, 3% 97%, 0 100%, 2% 74%, 0 50%, 3% 26%);
+    font: 700 23px/1 var(--font-hand), "Bradley Hand", cursive;
+    letter-spacing: 0;
+    opacity: 0.72;
+    scroll-snap-align: start;
+    transform: rotate(-1.6deg);
+    transition: opacity 260ms var(--ease), transform 260ms var(--ease), filter 260ms var(--ease);
+  }
+  .midnight .workstation-mobile-destinations .workstation-dock-tape:nth-child(even) { transform: rotate(1.2deg); }
+  .midnight .workstation-mobile-destinations .workstation-dock-tape:nth-child(3n) { transform: rotate(-0.6deg); }
+  .midnight .workstation-mobile-destinations .workstation-dock-tape[data-in-view] {
+    opacity: 1;
+    filter: brightness(1.08) drop-shadow(0 0 10px rgba(255, 190, 122, 0.45));
+    transform: translateY(-3px) rotate(-0.4deg);
+  }
+  .midnight .workstation-mobile-destinations .workstation-dock-tape:hover,
+  .midnight .workstation-mobile-destinations .workstation-dock-tape:focus-visible {
+    color: #1a130f;
+    background: #e6d7b5;
+    opacity: 1;
+    outline: none;
+  }
+  .midnight .workstation-mobile-destinations .workstation-dock-tape:focus-visible { filter: drop-shadow(0 0 0 2px var(--desk-amber)) drop-shadow(0 0 8px rgba(255, 190, 122, 0.7)); }
+
+  /* While browsing, the hint is a caption over the rail, not another panel. */
+  .midnight:not(.is-holding) .workstation-status-strip {
+    right: 20px;
+    bottom: calc(76px + env(safe-area-inset-bottom));
+    left: 20px;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    background: none;
+    box-shadow: none;
+    backdrop-filter: none;
+    text-align: center;
+  }
+  .midnight:not(.is-holding) .workstation-status-strip span {
+    color: var(--desk-muted);
+    font-size: 12px;
+    text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
+  }
+}
+
+@media (max-width: 720px) and (prefers-reduced-motion: reduce) {
+  .midnight .workstation-mobile-destinations .workstation-dock-tape { transition: none; }
+}
+
+/* Handoff: on an upright phone the laptop's page continues on the iPhone. */
+.workstation-handoff { display: flex; height: 100%; flex-direction: column; background: #000; }
+.workstation-handoff > .obj-laptop { min-height: 0; flex: 1; }
+.workstation-handoff-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin: 0;
+  /* Clear of the Dynamic Island. */
+  padding: 13% 12px 8px;
+  color: var(--lamp);
+  background: #000;
+  font: 600 11px/1 var(--font-ui);
+  letter-spacing: 0.02em;
+}
+.workstation-handoff-banner svg { font-size: 13px; }
+.workstation-surface[data-handoff] .obj-window-lights { display: none; }
+.workstation-surface[data-handoff] .obj-browser-tabs { padding-left: 8px; }

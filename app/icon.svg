@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#070b12"/>
-  <rect x="3" y="3" width="58" height="58" rx="11" fill="none" stroke="#67e8f9" stroke-opacity="0.45" stroke-width="2"/>
-  <text x="32" y="41" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24" font-weight="700" fill="#67e8f9">DN</text>
+  <rect width="64" height="64" rx="14" fill="#070a10"/>
+  <path d="M7 19 L12 16 L52 18 L58 15 L56 30 L58 44 L54 48 L8 47 L6 49 L8 34 Z" fill="#d9c9a6" transform="rotate(-5 32 32)"/>
+  <text x="32" y="41" text-anchor="middle" font-family="'Avenir Next', 'Segoe UI', system-ui, sans-serif" font-size="22" font-weight="800" fill="#2b211b" transform="rotate(-5 32 32)">DN</text>
 </svg>
