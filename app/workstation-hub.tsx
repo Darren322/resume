@@ -17,7 +17,7 @@ import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPa
 import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { renderToStaticMarkup } from "react-dom/server";
-import { FaGithub, FaLaptop, FaSliders, FaXmark } from "react-icons/fa6";
+import { FaGithub, FaSliders, FaXmark } from "react-icons/fa6";
 import { technologyIcon, technologyMarkFor } from "./marks";
 import { ObjectSurface, skillList, whereUsed, type SurfaceNode } from "./object-surfaces";
 import { resumeData, type ResumeItem } from "./resume-data";
@@ -78,15 +78,11 @@ const heldDecor: Record<string, string[]> = {
  */
 const READ_IN_PLACE = new Set<SurfaceNode>(["profile", "skills", "teaching", "education", "projects"]);
 /**
- * Landscape sheets an upright phone holds turned, long side down the screen,
- * reprinted as portrait pages so they read the right way up and large.
+ * Landscape objects an upright phone holds turned, long side down the screen:
+ * the sheets are reprinted as portrait pages, and the laptop's page is laid
+ * upright over its screen, so everything reads the right way up and large.
  */
-const TURNED_UPRIGHT = new Set(["projects", "education", "teaching"]);
-/**
- * On an upright phone the laptop hands its page off to the iPhone, Handoff
- * style: the phone is lifted instead and shows the work history, upright.
- */
-const HANDOFF: Partial<Record<string, string>> = { work: "contact" };
+const TURNED_UPRIGHT = new Set(["work", "projects", "education", "teaching"]);
 // How far a held page can be pinched in; phones need the most for wide sheets.
 const READING_MAX_ZOOM = 3.5;
 
@@ -113,6 +109,19 @@ type WorkstationHubProps = {
   /** Called after the selected artifact has completed its return-to-desk motion. */
   onReturn?: () => void;
 };
+
+/**
+ * What handling an object sounds like: paper crinkles, the keyboard's switches
+ * rattle, and the laptop and phone knock on the desk (the laptop's screen
+ * flickers on audibly once it is in hand).
+ */
+function handlingSound(audio: WorkstationAudio | null, id: string, settingDown: boolean) {
+  if (!audio) return;
+  if (id === "skills") audio.keys(settingDown ? 3 : 5);
+  else if (id === "work" || id === "contact") {
+    if (settingDown || id === "contact") audio.tap();
+  } else audio.paper();
+}
 
 type PickupPhase = "idle" | "lifting" | "held" | "returning";
 type PickupState = { phase: PickupPhase; progress: number; targetId: string | null };
@@ -1077,9 +1086,6 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
   // Sideways pan along the desk on upright phones, in world units.
   const panRef = useRef({ current: 0, target: 0 });
   const [portraitView, setPortraitView] = useState(false);
-  const portraitRef = useRef(false);
-  // Set while the phone carries another object's content (see HANDOFF).
-  const [handoff, setHandoff] = useState(false);
   const introElapsedRef = useRef(0);
   const robotHopRef = useRef(-1);
   const audioRef = useRef<WorkstationAudio | null>(null);
@@ -1182,21 +1188,18 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
     selectedIdRef.current = hotspot.id;
     setActiveId(hotspot.id);
     setSelectedId(hotspot.id);
-    // The object lifted; usually the one picked, unless it hands off to the phone.
-    const targetId = (portraitRef.current && HANDOFF[hotspot.id]) || hotspot.id;
-    setHandoff(targetId !== hotspot.id);
-    pickupRef.current = { phase: reduced ? "held" : "lifting", progress: reduced ? 1 : 0, targetId };
+    pickupRef.current = { phase: reduced ? "held" : "lifting", progress: reduced ? 1 : 0, targetId: hotspot.id };
     // The resume opens at its top-left corner; everything else opens centred.
     readingRef.current = hotspot.id === "profile" ? { scroll: -1e6, panX: -1e6, zoom: 1 } : { scroll: 0, panX: 0, zoom: 1 };
     setFocusedSkill(null);
-    audioRef.current?.rustle();
+    handlingSound(audioRef.current, hotspot.id, false);
     onSelectionChangeRef.current?.({ id: hotspot.id, node: hotspot.node, label: hotspot.label, hint: hotspot.hint });
   }, []);
 
   const closeSelection = useCallback(() => {
-    const targetId = pickupRef.current.targetId;
-    if (!selectedIdRef.current || !targetId || pickupRef.current.phase === "returning") return;
-    audioRef.current?.rustle();
+    const targetId = selectedIdRef.current;
+    if (!targetId || pickupRef.current.phase === "returning") return;
+    handlingSound(audioRef.current, targetId, true);
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (reduced) {
       pickupRef.current = { phase: "idle", progress: 0, targetId: null };
@@ -1204,7 +1207,6 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
       activeIdRef.current = null;
       setSelectedId(null);
       setActiveId(null);
-      setHandoff(false);
       onSelectionChangeRef.current?.(null);
       onReturnRef.current?.();
       return;
@@ -1379,7 +1381,6 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
       if (!framing.portrait) panRef.current.target = 0;
       zoomTargetRef.current = Math.min(zoomTargetRef.current, framing.maxZoom);
       setPortraitView(framing.portrait);
-      portraitRef.current = framing.portrait;
       if (framing.portrait !== printedUpright) reprint(framing.portrait);
       fog.density = 0.022 * 12.5 / framing.distance;
       camera.aspect = width / height;
@@ -1907,7 +1908,7 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
             page = (page + step + projects.length) % projects.length;
             paintPage();
             startFlip(brief, snapshot);
-            audioRef.current?.rustle();
+            audioRef.current?.paper();
           };
         }
 
@@ -1968,7 +1969,7 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
               material.needsUpdate = true;
             });
           });
-          audioRef.current?.rustle();
+          audioRef.current?.paper();
         };
         const shade = mountedModel.getObjectByName("desk-lamp-shade");
         if (shade) shade.getWorldPosition(lamp.position);
@@ -2195,7 +2196,7 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
         if (skill) {
           setFocusedSkill(skill);
           pressKey(skill);
-          audioRef.current?.rustle();
+          audioRef.current?.keys();
           return;
         }
       }
@@ -2217,7 +2218,7 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
       if (selectedIdRef.current) {
         // Clicking the background puts the artifact back; clicking another
         // object puts this one back and then picks that one up.
-        if (hit && hit !== "robot" && (hit.id === selectedIdRef.current || hit.id === pickupRef.current.targetId)) return;
+        if (hit && hit !== "robot" && hit.id === selectedIdRef.current) return;
         pendingPickRef.current = hit && hit !== "robot" ? hit : null;
         closeSelection();
         return;
@@ -2442,7 +2443,6 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
           activeIdRef.current = null;
           setSelectedId(null);
           setActiveId(null);
-          setHandoff(false);
           if (returnedId) onSelectionChangeRef.current?.(null);
           onReturnRef.current?.();
           const pending = pendingPickRef.current;
@@ -2517,6 +2517,8 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
         if (surfaceShownFor !== pickup.targetId) {
           surfaceShownFor = pickup.targetId;
           surfaceElement.dataset.visible = "true";
+          // The laptop's display stutters on (CSS) with a matching buzz.
+          if (pickup.targetId === "work") audioRef.current?.flicker();
         }
       } else if (surfaceElement && surfaceShownFor) {
         surfaceShownFor = null;
@@ -2758,8 +2760,6 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
     ? portraitView ? "Tap to see the other certificate · pinch to zoom" : "Click the certificate or use ← → to see the other one"
     : selectedHotspot?.id === "teaching" && portraitView
     ? "Pinch to zoom, drag to look around"
-    : handoff
-    ? "Handed off from the laptop · tap outside to put it back"
     : selectedHotspot
     ? `${selectedHotspot.label} in hand · click outside to put it back`
     : activeHotspot
@@ -2872,19 +2872,11 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
           sizes and positions it to the surface's on-screen rectangle. */}
       <div
         className="workstation-surface"
-        data-skin={handoff ? "phone" : selectedHotspot?.skin ?? "paper"}
-        data-handoff={handoff ? "" : undefined}
+        data-skin={selectedHotspot?.skin ?? "paper"}
         data-visible="false"
         ref={surfaceRef}
       >
-        {selectedHotspot && !READ_IN_PLACE.has(selectedHotspot.node) ? (
-          handoff ? (
-            <div className="workstation-handoff">
-              <p className="workstation-handoff-banner"><FaLaptop aria-hidden="true" /> Continued from MacBook</p>
-              <ObjectSurface node={selectedHotspot.node} onClose={closeSelection} />
-            </div>
-          ) : <ObjectSurface node={selectedHotspot.node} onClose={closeSelection} />
-        ) : null}
+        {selectedHotspot && !READ_IN_PLACE.has(selectedHotspot.node) ? <ObjectSurface node={selectedHotspot.node} onClose={closeSelection} /> : null}
       </div>
       {/* The resume and keyboard are read on the 3D objects themselves; screen readers get the text. */}
       {selectedHotspot && READ_IN_PLACE.has(selectedHotspot.node) ? (

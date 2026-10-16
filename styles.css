@@ -5274,22 +5274,19 @@ body { font-family: var(--font-ui); }
   .midnight .workstation-mobile-destinations .workstation-dock-tape { transition: none; }
 }
 
-/* Handoff: on an upright phone the laptop's page continues on the iPhone. */
-.workstation-handoff { display: flex; height: 100%; flex-direction: column; background: #000; }
-.workstation-handoff > .obj-laptop { min-height: 0; flex: 1; }
-.workstation-handoff-banner {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  margin: 0;
-  /* Clear of the Dynamic Island. */
-  padding: 13% 12px 8px;
-  color: var(--lamp);
-  background: #000;
-  font: 600 11px/1 var(--font-ui);
-  letter-spacing: 0.02em;
+
+/* The laptop's display stutters on when it comes into the hand, in step with
+   the buzz in workstation-audio's flicker(). */
+.workstation-surface[data-skin="screen"][data-visible="true"] { animation: screenFlicker 460ms steps(1, end); }
+@keyframes screenFlicker {
+  0% { opacity: 0.7; filter: brightness(1.6); }
+  13% { opacity: 0.05; filter: none; }
+  26% { opacity: 0.85; filter: brightness(1.4); }
+  35% { opacity: 0.15; filter: none; }
+  52% { opacity: 0.9; filter: brightness(1.25); }
+  65% { opacity: 0.35; filter: none; }
+  78%, 100% { opacity: 1; filter: none; }
 }
-.workstation-handoff-banner svg { font-size: 13px; }
-.workstation-surface[data-handoff] .obj-window-lights { display: none; }
-.workstation-surface[data-handoff] .obj-browser-tabs { padding-left: 8px; }
+@media (prefers-reduced-motion: reduce) {
+  .workstation-surface[data-skin="screen"][data-visible="true"] { animation: none; }
+}
