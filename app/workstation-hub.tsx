@@ -1377,17 +1377,29 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
     type SwapSheet = { mesh: THREE.Mesh; from: THREE.Vector3; to: THREE.Vector3; fromQ: THREE.Quaternion; toQ: THREE.Quaternion; lateral: THREE.Vector3; lift: THREE.Vector3 };
     let swap: { t: number; sheets: SwapSheet[]; hidden: THREE.Object3D[]; done: () => void } | null = null;
     const SWAP_SECONDS = 0.85;
-    const startSwap = (top: THREE.Mesh, under: THREE.Mesh, topMap: THREE.Texture, underMap: THREE.Texture, hidden: THREE.Object3D[], done: () => void) => {
+    const startSwap = (top: THREE.Mesh, under: THREE.Mesh, topMap: THREE.Texture, underMap: THREE.Texture, hidden: THREE.Object3D[], seal: THREE.Object3D[], done: () => void) => {
       if (swap) return;
       if (reduced) {
         done();
         return;
       }
+      // The seal belongs to a certificate, so each moving sheet carries its own,
+      // placed where the seal sits on the top sheet.
+      top.updateMatrix();
+      const topInverse = top.matrix.clone().invert();
+      const sealFor = (sheet: THREE.Mesh) => seal.forEach((part) => {
+        part.updateMatrix();
+        const copy = part.clone();
+        new THREE.Matrix4().multiplyMatrices(topInverse, part.matrix).decompose(copy.position, copy.quaternion, copy.scale);
+        copy.visible = true;
+        sheet.add(copy);
+      });
       const sheetFor = (face: THREE.Mesh, map: THREE.Texture, toFace: THREE.Mesh, side: number, rise: number): SwapSheet => {
         const material = new THREE.MeshStandardMaterial({ map, color: (face.material as THREE.MeshStandardMaterial).color, roughness: 0.9, side: THREE.DoubleSide });
         const mesh = new THREE.Mesh(face.geometry, material);
         mesh.scale.copy(face.scale);
         face.parent!.add(mesh);
+        sealFor(mesh);
         face.geometry.computeBoundingBox();
         const width = (face.geometry.boundingBox!.max.x - face.geometry.boundingBox!.min.x) * face.scale.x;
         return {
@@ -1783,10 +1795,13 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
           if (certificateFaces.length < 2 || !(topCertificate instanceof THREE.Mesh) || !(underCertificate instanceof THREE.Mesh)) return;
           // The sheets, their prints and the seal hide while the proxies move.
           const hidden: THREE.Object3D[] = [];
+          const seal: THREE.Object3D[] = [];
           educationRoot?.traverse((object) => {
-            if (object !== educationRoot && /^education-(certificate|seal)/.test(object.name) && object.visible) hidden.push(object);
+            if (object === educationRoot || !object.visible) return;
+            if (/^education-(certificate|seal)/.test(object.name)) hidden.push(object);
+            if (/^education-seal/.test(object.name)) seal.push(object);
           });
-          startSwap(topCertificate, underCertificate, certificateTextures[0], certificateTextures[1], hidden, () => {
+          startSwap(topCertificate, underCertificate, certificateTextures[0], certificateTextures[1], hidden, seal, () => {
             certificateTextures.push(certificateTextures.shift()!);
             certificateFaces.forEach((material, index) => {
               material.map = certificateTextures[index];
