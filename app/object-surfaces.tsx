@@ -4,6 +4,7 @@ import { useMemo, useState, type CSSProperties, type KeyboardEvent } from "react
 import { FaAnglesLeft, FaAnglesRight, FaBatteryFull, FaChevronLeft, FaChevronRight, FaEnvelope, FaFilePdf, FaGithub, FaLinkedin, FaLock, FaPhone, FaSignal, FaWifi } from "react-icons/fa6";
 import { TechIcon, technologyColor, technologyHasLogo, technologyMarkFor } from "./marks";
 import { resumeData, type NodeId, type ResumeItem } from "./resume-data";
+import { currentSgtHours, formatSgt } from "./sgt-daylight";
 
 /**
  * What a visitor sees on an artifact they have picked up. Each object gets the
@@ -19,10 +20,10 @@ const links = {
   linkedin: "https://linkedin.com/in/darren-ng-yijie-190696288",
 };
 
-/** Every pick-up object: a resume section, or the monitor's overview. */
-export type SurfaceNode = NodeId | "overview";
+/** Every pick-up object is a resume section. */
+export type SurfaceNode = NodeId;
 
-type SurfaceProps = { onClose: () => void; onOpen?: (node: SurfaceNode) => void };
+type SurfaceProps = { onClose: () => void };
 
 /** Page through a list with Previous / Next, remembering the direction for motion. */
 function usePager(count: number) {
@@ -317,6 +318,8 @@ export function SkillsKeyboard(_: SurfaceProps) {
 
 /* ── Phone: a Pro Max–style home screen of ways to reach me ─────────────── */
 function ContactPhone(_: SurfaceProps) {
+  // Only mounted once the phone is picked up, so reading the clock here is client-side.
+  const [clock] = useState(() => formatSgt(currentSgtHours()).replace(/ [AP]M$/, ""));
   const grid = [
     { label: "Resume", href: resumePdf, icon: <FaFilePdf />, tint: "linear-gradient(160deg, #ff8a4c, #e5482a)", external: true },
     { label: "Portfolio", href: links.github, icon: <FaGithub />, tint: "linear-gradient(160deg, #3a3f4a, #15171c)", external: true },
@@ -344,7 +347,7 @@ function ContactPhone(_: SurfaceProps) {
   return (
     <div className="obj-phone">
       <p className="obj-phone-status" aria-hidden="true">
-        <span>11:47</span>
+        <span>{clock}</span>
         <span className="obj-phone-island" />
         <span className="obj-phone-indicators"><FaSignal /><FaWifi /><FaBatteryFull /></span>
       </p>
@@ -356,49 +359,6 @@ function ContactPhone(_: SurfaceProps) {
       <nav className="obj-phone-grid" aria-label="Documents">{grid.map((entry) => app(entry, true))}</nav>
       <nav className="obj-phone-dock" aria-label="Contact">{dock.map((entry) => app(entry, false))}</nav>
       <span className="obj-phone-home" aria-hidden="true" />
-    </div>
-  );
-}
-
-/* ── Monitor: "At a glance", the elevator pitch for recruiters ────────────── */
-function Overview({ onOpen }: SurfaceProps) {
-  const current = resumeData.work.items[0];
-  const school = resumeData.education.items[0];
-  const results = [
-    { item: resumeData.work.items[0], node: "work" as const },
-    { item: resumeData.projects.items[0], node: "projects" as const },
-    { item: resumeData.projects.items[2], node: "projects" as const },
-  ].filter((entry) => entry.item?.highlight);
-  const open = (node: SurfaceNode) => () => onOpen?.(node);
-
-  return (
-    <div className="obj-overview">
-      <header className="obj-overview-head">
-        <h2>Darren Ng</h2>
-        <p>Software engineer building events platforms, data pipelines and multi-agent systems in Singapore.</p>
-      </header>
-      <div className="obj-overview-facts">
-        <p><span>Now</span>{splitSubtitle(current.subtitle).first} at {current.short ?? current.title}</p>
-        <p><span>Studying</span>{school.subtitle?.split(" · ")[0]}, {school.short}, {school.bullets[0]}</p>
-      </div>
-      <ol className="obj-overview-results" aria-label="Strongest results">
-        {results.map(({ item, node }) => (
-          <li key={item.title}>
-            <button type="button" onClick={open(node)}>
-              <strong>{item.highlight!.value}</strong>
-              <span>{item.highlight!.label}</span>
-              <small>{item.short ?? item.title}</small>
-            </button>
-          </li>
-        ))}
-      </ol>
-      <nav className="obj-overview-jump" aria-label="Pick up a section">
-        <button type="button" onClick={open("profile")}>Read the resume</button>
-        <button type="button" onClick={open("work")}>Work</button>
-        <button type="button" onClick={open("projects")}>Projects</button>
-        <button type="button" onClick={open("skills")}>Skills</button>
-        <button type="button" onClick={open("contact")}>Contact</button>
-      </nav>
     </div>
   );
 }
@@ -519,7 +479,6 @@ function ResumePaper({ onClose }: SurfaceProps) {
 }
 
 const surfaces: Record<SurfaceNode, (props: SurfaceProps) => React.ReactElement> = {
-  overview: Overview,
   profile: ResumePaper,
   work: WorkLaptop,
   projects: ProjectsFolder,
@@ -529,8 +488,8 @@ const surfaces: Record<SurfaceNode, (props: SurfaceProps) => React.ReactElement>
   contact: ContactPhone,
 };
 
-export function ObjectSurface({ node, onClose, onOpen }: { node: SurfaceNode | null; onClose: () => void; onOpen?: (node: SurfaceNode) => void }) {
+export function ObjectSurface({ node, onClose }: { node: SurfaceNode | null; onClose: () => void }) {
   if (!node) return null;
   const Surface = surfaces[node];
-  return <Surface onClose={onClose} onOpen={onOpen} />;
+  return <Surface onClose={onClose} />;
 }

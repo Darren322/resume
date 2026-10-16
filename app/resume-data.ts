@@ -8,6 +8,8 @@ export type ResumeItem = {
   highlight?: { value: string; label: string };
   /** Tools named for this item on the resume. */
   stack?: string[];
+  /** Public source repository, printed and clickable on the project brief. */
+  repo?: string;
   bullets: string[];
   visual: ResumeVisual;
   showcase?: ProjectShowcase;
@@ -229,6 +231,7 @@ export const resumeData: Record<NodeId, ResumeNode> = {
     items: [
       {
         title: "TikTok TechJam 2026 — Finalist (Top 12)",
+        repo: "https://github.com/TheMajoris/liuqitechjam",
         short: "LiuQi",
         subtitle: "LiuQi · Multi-agent orchestration",
         period: "Sep 2026",
@@ -286,6 +289,7 @@ export const resumeData: Record<NodeId, ResumeNode> = {
       },
       {
         title: "AI-Powered Learning Management System",
+        repo: "https://github.com/Joseph-LohYeKai/CS203-Project",
         short: "Learning platform",
         subtitle: "React · Spring Boot · FastAPI",
         period: "Jan 2026 — Apr 2026",
@@ -350,6 +354,7 @@ export const resumeData: Record<NodeId, ResumeNode> = {
       },
       {
         title: "Facial Recognition Attendance System",
+        repo: "https://github.com/Darren322/cs102-opencv",
         short: "Face attendance",
         subtitle: "Java · Spring Boot · OpenCV · AWS",
         period: "Aug 2025 — Oct 2025",

@@ -9,6 +9,7 @@ import {
 } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
@@ -16,11 +17,13 @@ import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPa
 import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { renderToStaticMarkup } from "react-dom/server";
-import { FaSliders, FaXmark } from "react-icons/fa6";
+import { FaGithub, FaSliders, FaXmark } from "react-icons/fa6";
 import { technologyIcon, technologyMarkFor } from "./marks";
 import { ObjectSurface, skillList, whereUsed, type SurfaceNode } from "./object-surfaces";
-import { resumeData } from "./resume-data";
+import { resumeData, type ResumeItem } from "./resume-data";
+import { site, siteUrl } from "./site";
 import { createWorkstationAudio, type WorkstationAudio } from "./workstation-audio";
+import { createDaylight, currentSgtHours, daylightAt, formatSgt, partOfDay, sgtDateLabel } from "./sgt-daylight";
 
 /** How the content laid over a held artifact's reading surface is dressed. */
 type SurfaceSkin = "paper" | "screen" | "phone" | "keys";
@@ -36,7 +39,6 @@ type HubHotspot = {
 // Recruiter priority, which is also Tab and dock order: resume, work and
 // projects first (they sit front and centre under the lamp), then the rest.
 const hotspots: HubHotspot[] = [
-  { id: "overview", node: "overview", label: "At a glance", hint: "Monitor / start here", skin: "screen" },
   { id: "profile", node: "profile", label: "Resume", hint: "One-page resume", skin: "paper" },
   { id: "work", node: "work", label: "Work", hint: "Laptop / experience", skin: "screen" },
   { id: "projects", node: "projects", label: "Projects", hint: "Project folders", skin: "paper" },
@@ -61,15 +63,20 @@ type ReadingSurface = {
  * artifact (labels, placeholder code lines, keycaps…). Hidden while held.
  */
 const heldDecor: Record<string, string[]> = {
-  overview: ["hotspot-tag-overview"],
   profile: ["profile-badge", "hotspot-tag-profile"],
   work: ["laptop-code-line", "hotspot-tag-work"],
   projects: ["hotspot-tag-projects"],
   skills: ["hotspot-tag-skills"],
-  education: ["education-cert-line", "education-seal", "education-cap", "education-tassel", "hotspot-tag-education"],
-  teaching: ["notebook-line", "teaching-pen", "hotspot-tag-teaching"],
-  contact: ["phone-notification", "hotspot-tag-contact"],
+  education: ["education-cap", "hotspot-tag-education"],
+  teaching: ["teaching-pen", "hotspot-tag-teaching"],
+  contact: ["hotspot-tag-contact"],
 };
+
+/**
+ * Objects read on the 3D object itself, like the printed resume: what is on
+ * the desk is exactly what is in the hand. Screen readers still get the text.
+ */
+const READ_IN_PLACE = new Set<SurfaceNode>(["profile", "skills", "teaching", "education", "projects"]);
 
 const FOV = 34;
 const DESK_CENTER = new THREE.Vector3(0, 1.64, 0.35);
@@ -191,64 +198,596 @@ function paintTape(label: string, fontFamily: string) {
  * the desk and in hand. `punched` adds binder holes for the filed project brief.
  */
 /**
- * The monitor's resting screen: the same "At a glance" content the visitor
- * sees when they pick it up, so the desk and the close-up agree.
+ * The monitor's wallpaper: soft light fields in the desk's own palette
+ * (screen aqua, lamp amber, midnight) with fine grain, and Darren's name set
+ * large like a personal desktop. Ambient only; the monitor is not a pick-up object.
  */
-function paintOverviewScreen(fontFamily: string) {
+function paintWallpaper(fontFamily: string) {
   const width = 2560;
-  const height = Math.round(width / (5.12 / 2.14));
+  const height = 1070;
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
   const context = canvas.getContext("2d")!;
-  context.fillStyle = "#04060a";
+  context.fillStyle = "#060912";
   context.fillRect(0, 0, width, height);
-  const glow = context.createRadialGradient(width * 0.15, 0, 0, width * 0.15, 0, width * 0.7);
-  glow.addColorStop(0, "rgba(242, 182, 109, 0.10)");
-  glow.addColorStop(1, "rgba(0, 0, 0, 0)");
-  context.fillStyle = glow;
-  context.fillRect(0, 0, width, height);
-  const pad = 130;
+  const field = (x: number, y: number, radius: number, colour: string) => {
+    const gradient = context.createRadialGradient(x, y, 0, x, y, radius);
+    gradient.addColorStop(0, colour);
+    gradient.addColorStop(1, "rgba(0, 0, 0, 0)");
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, width, height);
+  };
+  context.globalCompositeOperation = "lighter";
+  field(width * 0.16, height * 1.0, width * 0.46, "rgba(45, 185, 210, 0.85)");
+  field(width * 0.46, height * 0.6, width * 0.36, "rgba(40, 72, 190, 0.8)");
+  field(width * 0.88, height * 0.0, width * 0.4, "rgba(255, 150, 70, 0.8)");
+  field(width * 0.72, height * 0.95, width * 0.24, "rgba(150, 80, 190, 0.45)");
+  // Long soft bands, like light through a window, sweeping across.
+  context.globalCompositeOperation = "screen";
+  for (let band = 0; band < 5; band += 1) {
+    const y = height * (0.2 + band * 0.16);
+    const gradient = context.createLinearGradient(0, y - 90, 0, y + 90);
+    gradient.addColorStop(0, "rgba(255, 255, 255, 0)");
+    gradient.addColorStop(0.5, `rgba(180, 210, 255, ${0.035 + band * 0.01})`);
+    gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
+    context.save();
+    context.translate(width / 2, y);
+    context.rotate(-0.12 + band * 0.03);
+    context.translate(-width / 2, -y);
+    context.fillStyle = gradient;
+    context.fillRect(-200, y - 90, width + 400, 180);
+    context.restore();
+  }
+  context.globalCompositeOperation = "source-over";
+  // Fine grain so the gradients never band.
+  const grain = context.getImageData(0, 0, width, height);
+  for (let index = 0; index < grain.data.length; index += 4) {
+    const noise = (Math.random() - 0.5) * 10;
+    grain.data[index] += noise;
+    grain.data[index + 1] += noise;
+    grain.data[index + 2] += noise;
+  }
+  context.putImageData(grain, 0, 0);
+
+  // Who this desk belongs to, set low-left so it reads past the laptop lid.
+  const left = width * 0.06;
   context.textBaseline = "alphabetic";
-  context.fillStyle = "#ece7de";
-  context.font = `750 190px ${fontFamily}`;
-  context.fillText("Darren Ng", pad, pad + 170);
-  context.fillStyle = "#c9ced8";
-  context.font = `400 52px ${fontFamily}`;
-  context.fillText("Software engineer building events platforms, data pipelines and multi-agent systems.", pad, pad + 270);
-  const results = [resumeData.work.items[0], resumeData.projects.items[0], resumeData.projects.items[2]];
-  const cardWidth = (width - pad * 2 - 80) / 3;
-  results.forEach((item, index) => {
-    if (!item?.highlight) return;
-    const left = pad + index * (cardWidth + 40);
-    const top = pad + 360;
-    context.strokeStyle = "rgba(236, 231, 222, 0.14)";
-    context.lineWidth = 3;
-    context.beginPath();
-    context.roundRect(left, top, cardWidth, height - top - pad, 28);
-    context.stroke();
-    context.fillStyle = "#f2b66d";
-    context.font = `750 132px ${fontFamily}`;
-    context.fillText(item.highlight.value, left + 50, top + 170);
-    context.fillStyle = "#d8dce4";
-    context.font = `400 44px ${fontFamily}`;
-    const words = item.highlight.label.split(" ");
-    let line = "";
-    let y = top + 250;
-    words.forEach((word) => {
-      const next = line ? `${line} ${word}` : word;
-      if (context.measureText(next).width > cardWidth - 100) {
-        context.fillText(line, left + 50, y);
-        line = word;
-        y += 58;
-      } else line = next;
-    });
-    context.fillText(line, left + 50, y);
-  });
+  context.shadowColor = "rgba(0, 0, 0, 0.35)";
+  context.shadowBlur = 40;
+  context.fillStyle = "#f1ece4";
+  context.font = `750 300px ${fontFamily}`;
+  context.fillText(site.name, left, height * 0.58);
+  context.shadowBlur = 0;
+  context.fillStyle = "#f2b66d";
+  context.font = `650 78px ${fontFamily}`;
+  context.fillText(`${site.jobTitle} · ${site.locality}`, left + 8, height * 0.7);
+  context.fillStyle = "rgba(236, 231, 222, 0.85)";
+  context.font = `450 56px ${fontFamily}`;
+  context.fillText("Curious about building systems that stay maintainable, scale, and are fun.", left + 8, height * 0.79);
+  context.fillStyle = "#6fd6e6";
+  context.font = `600 52px ${fontFamily}`;
+  context.fillText("Right now: building AI agents.", left + 8, height * 0.87);
+  context.textAlign = "right";
+  context.fillStyle = "rgba(236, 231, 222, 0.6)";
+  context.font = `600 52px ${fontFamily}`;
+  context.fillText(siteUrl.replace(/^https?:\/\//, ""), width - left, height * 0.12);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.flipY = false;
   return texture;
+}
+
+/**
+ * Fine, matte plastic grain (PBT keycaps, printed cases) as a tiling normal
+ * map: random bumps, lightly blurred, turned into normals by finite differences.
+ */
+function paintGrainNormal(size = 256) {
+  const heights = new Float32Array(size * size);
+  for (let index = 0; index < heights.length; index += 1) heights[index] = Math.random();
+  // Two box-blur passes soften single-pixel noise into grain.
+  for (let pass = 0; pass < 2; pass += 1) {
+    const copy = heights.slice();
+    for (let y = 0; y < size; y += 1) {
+      for (let x = 0; x < size; x += 1) {
+        let sum = 0;
+        for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) sum += copy[((y + dy + size) % size) * size + ((x + dx + size) % size)];
+        heights[y * size + x] = sum / 9;
+      }
+    }
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext("2d")!;
+  const image = context.createImageData(size, size);
+  const strength = 6;
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const dx = heights[y * size + ((x + 1) % size)] - heights[y * size + ((x - 1 + size) % size)];
+      const dy = heights[((y + 1) % size) * size + x] - heights[((y - 1 + size) % size) * size + x];
+      const nx = -dx * strength;
+      const ny = -dy * strength;
+      const length = Math.hypot(nx, ny, 1);
+      const offset = (y * size + x) * 4;
+      image.data[offset] = (nx / length * 0.5 + 0.5) * 255;
+      image.data[offset + 1] = (ny / length * 0.5 + 0.5) * 255;
+      image.data[offset + 2] = (1 / length * 0.5 + 0.5) * 255;
+      image.data[offset + 3] = 255;
+    }
+  }
+  context.putImageData(image, 0, 0);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  return texture;
+}
+
+/**
+ * One handwritten notebook page: the teaching entry on blue ruling with a
+ * margin. It is read on the 3D page itself, on the desk and in the hand.
+ */
+function paintNotebookPage(item: ResumeItem | undefined, handFamily: string) {
+  const width = 820;
+  const height = 984; // the page's 0.75 x 0.9 proportions
+  const rule = 58;
+  const canvas = document.createElement("canvas");
+  canvas.width = width * 2;
+  canvas.height = height * 2; // drawn at 2x so it stays sharp when held up close
+  const context = canvas.getContext("2d")!;
+  context.scale(2, 2);
+  context.fillStyle = "#e3dccd";
+  context.fillRect(0, 0, width, height);
+  context.fillStyle = "rgba(44, 79, 158, 0.22)";
+  for (let y = rule - 2; y < height; y += rule) context.fillRect(0, y, width, 2);
+  context.fillStyle = "rgba(168, 105, 42, 0.45)";
+  context.fillRect(64, 0, 4, height);
+  if (!item) return canvas;
+
+  const left = 94;
+  const maxWidth = width - left - 50;
+  let line = 1;
+  const write = (text: string, size: number, weight: number, colour: string, gapAfter = 0) => {
+    context.fillStyle = colour;
+    context.font = `${weight} ${size}px ${handFamily}`;
+    // Wrap onto the ruling, word by word.
+    let current = "";
+    const flush = () => {
+      context.fillText(current, left, line * rule - 12);
+      line += 1;
+      current = "";
+    };
+    text.split(" ").forEach((word) => {
+      const next = current ? `${current} ${word}` : word;
+      if (current && context.measureText(next).width > maxWidth) flush();
+      current = current ? `${current} ${word}` : word;
+    });
+    if (current) flush();
+    line += gapAfter;
+  };
+  const [role, ...rest] = (item.subtitle ?? "").split(" · ");
+  write(item.title, 58, 700, "#1b1d24", 1);
+  write(role, 41, 700, "#1b1d24");
+  write(rest.join(" · "), 41, 500, "#2c4f9e");
+  write(item.period ?? "", 41, 500, "#a8692a");
+  item.bullets.forEach((bullet) => write(bullet, 41, 500, "#2c4f9e"));
+  return canvas;
+}
+
+/** The GitHub mark as a canvas path, taken from the site's own icon set. */
+const githubMark = (() => {
+  if (typeof document === "undefined") return null;
+  const svg = renderToStaticMarkup(<FaGithub />);
+  const path = /\sd="([^"]+)"/.exec(svg)?.[1];
+  const viewBox = /viewBox="([^"]+)"/.exec(svg)?.[1].split(" ").map(Number);
+  return path && viewBox ? { path: new Path2D(path), width: viewBox[2], height: viewBox[3] } : null;
+})();
+
+/** Where the repo link sits on a project brief, in 0–1 texture coordinates. */
+type LinkArea = { href: string; u0: number; v0: number; u1: number; v1: number };
+
+/**
+ * One printed project brief on the folder's top sheet, laid out like a case
+ * study: header, title and stack line, a metric card and overview on the left,
+ * numbered "what I built" on the right, stack tags and the repo link in the
+ * footer, and a folded corner that says the page turns. Text shrinks to fit,
+ * so nothing ever collides. Returns where the repo link was printed.
+ */
+function paintProjectSheet(canvas: HTMLCanvasElement, item: ResumeItem, page: number, total: number, fontFamily: string): LinkArea | null {
+  const width = 1378;
+  const height = 1000;
+  const margin = 96;
+  const ink = "#1b1d24";
+  const body = "#33363f";
+  const muted = "#6b6f78";
+  const accent = "#1f3b7a";
+  const warm = "#a8692a";
+  const context = canvas.getContext("2d")!;
+  context.setTransform(canvas.width / width, 0, 0, canvas.height / height, 0, 0);
+  context.fillStyle = "#f4efe5";
+  context.fillRect(0, 0, width, height);
+  for (let index = 0; index < 1200; index += 1) {
+    context.fillStyle = `rgba(90, 70, 40, ${Math.random() * 0.04})`;
+    context.fillRect(Math.random() * width, Math.random() * height, 2, 2);
+  }
+  context.textBaseline = "alphabetic";
+  const font = (weight: number, size: number) => `${weight} ${size}px ${fontFamily}`;
+  const lines = (text: string, size: number, weight: number, columnWidth: number) => {
+    context.font = font(weight, size);
+    const out: string[] = [];
+    let current = "";
+    text.split(" ").forEach((word) => {
+      const next = current ? `${current} ${word}` : word;
+      if (current && context.measureText(next).width > columnWidth) {
+        out.push(current);
+        current = word;
+      } else current = next;
+    });
+    if (current) out.push(current);
+    return out;
+  };
+  const draw = (text: string, x: number, y: number, size: number, weight: number, colour: string, align: CanvasTextAlign = "left") => {
+    context.font = font(weight, size);
+    context.fillStyle = colour;
+    context.textAlign = align;
+    context.fillText(text, x, y);
+    context.textAlign = "left";
+  };
+
+  // Header.
+  draw("PROJECTS", margin, 92, 20, 700, warm);
+  context.font = font(700, 20);
+  draw(`${String(page + 1).padStart(2, "0")} / ${String(total).padStart(2, "0")}`, margin + context.measureText("PROJECTS").width + 18, 92, 20, 600, muted);
+  draw(item.period ?? "", width - margin, 92, 22, 600, muted, "right");
+  context.fillStyle = "rgba(27, 29, 36, 0.14)";
+  context.fillRect(margin, 112, width - margin * 2, 2);
+
+  // Title and stack line, full width.
+  let titleSize = 54;
+  let titleLines = lines(item.title, titleSize, 750, width - margin * 2);
+  while (titleLines.length > 2 && titleSize > 36) titleLines = lines(item.title, (titleSize -= 2), 750, width - margin * 2);
+  let y = 184;
+  titleLines.forEach((text) => {
+    draw(text, margin, y, titleSize, 750, ink);
+    y += titleSize * 1.12;
+  });
+  const bodyTop = y + 20;
+  const bodyBottom = height - 190;
+
+  // Left column: metric card, then overview.
+  const leftX = margin;
+  const leftWidth = 520;
+  let leftY = bodyTop;
+  if (item.highlight) {
+    const labelLines = lines(item.highlight.label, 24, 500, leftWidth - 64);
+    const cardHeight = 150 + labelLines.length * 32;
+    context.fillStyle = "rgba(31, 59, 122, 0.07)";
+    context.fillRect(leftX, leftY, leftWidth, cardHeight);
+    context.fillStyle = accent;
+    context.fillRect(leftX, leftY, 6, cardHeight);
+    context.font = font(800, 84);
+    const valueSize = Math.min(84, Math.floor(84 * (leftWidth - 64) / context.measureText(item.highlight.value).width));
+    draw(item.highlight.value, leftX + 32, leftY + 104, valueSize, 800, accent);
+    labelLines.forEach((text, index) => draw(text, leftX + 32, leftY + 146 + index * 32, 24, 500, body));
+    leftY += cardHeight + 46;
+  }
+  if (item.showcase?.summary) {
+    draw("OVERVIEW", leftX, leftY, 18, 700, warm);
+    let size = 26;
+    let summary = lines(item.showcase.summary, size, 450, leftWidth);
+    while (leftY + 40 + summary.length * size * 1.45 > bodyBottom && size > 18) summary = lines(item.showcase.summary, (size -= 1), 450, leftWidth);
+    summary.forEach((text, index) => draw(text, leftX, leftY + 44 + index * size * 1.45, size, 450, body));
+  }
+
+  // Right column: what was built, numbered.
+  const rightX = 680;
+  const rightWidth = width - margin - rightX;
+  context.fillStyle = "rgba(27, 29, 36, 0.1)";
+  context.fillRect(rightX - 44, bodyTop, 2, bodyBottom - bodyTop);
+  draw("WHAT I BUILT", rightX, bodyTop + 18, 18, 700, warm);
+  let size = 25;
+  const measure = (fontSize: number) => item.bullets.reduce((total, bullet) => total + lines(bullet, fontSize, 450, rightWidth - 56).length * fontSize * 1.45 + 26, 0);
+  while (bodyTop + 56 + measure(size) > bodyBottom && size > 17) size -= 1;
+  let rightY = bodyTop + 62;
+  item.bullets.forEach((bullet, index) => {
+    draw(String(index + 1).padStart(2, "0"), rightX, rightY, size - 2, 700, warm);
+    lines(bullet, size, 450, rightWidth - 56).forEach((text) => {
+      draw(text, rightX + 56, rightY, size, 450, body);
+      rightY += size * 1.45;
+    });
+    rightY += 26;
+  });
+
+  // Footer: the repo link right-aligned, stack tags filling the space before it.
+  context.fillStyle = "rgba(27, 29, 36, 0.14)";
+  context.fillRect(margin, height - 150, width - margin * 2, 2);
+  const tagY = height - 108;
+  let link: LinkArea | null = null;
+  let tagLimit = width - margin;
+  if (item.repo) {
+    const label = item.repo.replace(/^https?:\/\//, "");
+    let linkSize = 22;
+    context.font = font(650, linkSize);
+    while (context.measureText(label).width > 500 && linkSize > 16) context.font = font(650, (linkSize -= 1));
+    const labelWidth = context.measureText(label).width;
+    const right = width - 150; // clear of the folded corner
+
+    const left = right - labelWidth - 38;
+    // The GitHub mark, then the address, underlined like a link.
+    context.fillStyle = ink;
+    if (githubMark) {
+      context.save();
+      context.translate(left, tagY - 22);
+      context.scale(28 / githubMark.height, 28 / githubMark.height);
+      context.fill(githubMark.path);
+      context.restore();
+    }
+    draw(label, left + 38, tagY, linkSize, 650, accent);
+    context.fillStyle = accent;
+    context.fillRect(left + 38, tagY + 6, labelWidth, 2);
+    link = { href: item.repo, u0: (left - 10) / width, v0: (tagY - 34) / height, u1: (right + 10) / width, v1: (tagY + 16) / height };
+    tagLimit = left - 32;
+  }
+  const tags = item.stack ?? [];
+  let tagX = margin;
+  context.font = font(600, 19);
+  const chip = (text: string) => {
+    const tagWidth = context.measureText(text).width + 28;
+    context.strokeStyle = "rgba(27, 29, 36, 0.35)";
+    context.lineWidth = 1.5;
+    context.beginPath();
+    context.roundRect(tagX, tagY - 24, tagWidth, 36, 18);
+    context.stroke();
+    draw(text, tagX + 14, tagY, 19, 600, body);
+    context.font = font(600, 19);
+    tagX += tagWidth + 10;
+  };
+  for (let index = 0; index < tags.length; index += 1) {
+    const remaining = tags.length - index;
+    const nextWidth = context.measureText(tags[index]).width + 38;
+    const moreWidth = remaining > 1 ? context.measureText(`+${remaining - 1}`).width + 38 : 0;
+    if (tagX + nextWidth + moreWidth > tagLimit) {
+      chip(`+${remaining}`);
+      break;
+    }
+    chip(tags[index]);
+  }
+
+  // Folded corner: the page lifts at the bottom right, so it reads as turnable.
+  const fold = 118;
+  context.fillStyle = "#cfc6b4"; // the next sheet showing beneath
+  context.beginPath();
+  context.moveTo(width - fold, height);
+  context.lineTo(width, height - fold);
+  context.lineTo(width, height);
+  context.closePath();
+  context.fill();
+  const flap = context.createLinearGradient(width - fold, height - fold, width - fold / 2, height - fold / 2);
+  flap.addColorStop(0, "#e6dfd0");
+  flap.addColorStop(1, "#fbf7ef");
+  context.fillStyle = flap;
+  context.beginPath();
+  context.moveTo(width - fold, height);
+  context.lineTo(width, height - fold);
+  context.lineTo(width - fold, height - fold);
+  context.closePath();
+  context.shadowColor = "rgba(0, 0, 0, 0.22)";
+  context.shadowBlur = 22;
+  context.shadowOffsetX = -6;
+  context.shadowOffsetY = -6;
+  context.fill();
+  context.shadowColor = "transparent";
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  return link;
+}
+
+/**
+ * The Corne's reflective (Sharp MiP) displays: black pixels on grey. Left
+ * half: battery, Bluetooth and the active layer; right half: a small mountain
+ * scene, like Darren's own boards.
+ */
+function paintKeyboardDisplay(side: "left" | "right", fontFamily: string) {
+  const width = 200;
+  const height = 536;
+  // Sharp memory LCDs are low resolution: draw at ~68 x 182 real pixels and
+  // show them unsmoothed, so the panel reads as a real tiny display.
+  const canvas = document.createElement("canvas");
+  canvas.width = 68;
+  canvas.height = 182;
+  const context = canvas.getContext("2d")!;
+  context.scale(canvas.width / width, canvas.height / height);
+  context.fillStyle = "#c9ccc4";
+  context.fillRect(0, 0, width, height);
+  context.translate(0, (height - 460) / 2); // the layout below is drawn for 460 tall
+  context.fillStyle = "#15171a";
+  context.strokeStyle = "#15171a";
+  context.lineWidth = 6;
+  // Battery and a status glyph along the top.
+  context.strokeRect(18, 22, 56, 26);
+  context.fillRect(76, 30, 6, 10);
+  context.fillRect(24, 28, 34, 14);
+  if (side === "left") {
+    context.beginPath();
+    context.arc(width - 40, 36, 14, 0, Math.PI * 2);
+    context.stroke();
+    context.strokeRect(18, 78, width - 36, 92);
+    context.beginPath();
+    context.moveTo(30, 158);
+    context.lineTo(width - 50, 150);
+    context.lineTo(width - 40, 92);
+    context.stroke();
+    context.font = `700 44px ${fontFamily}`;
+    context.textAlign = "center";
+    [["1", 52, 240], ["2", 148, 240], ["3", 100, 300], ["4", 52, 360], ["5", 148, 360]].forEach(([label, x, y], index) => {
+      if (index === 0) {
+        context.beginPath();
+        context.arc(x as number, (y as number) - 15, 26, 0, Math.PI * 2);
+        context.fill();
+        context.fillStyle = "#c9ccc4";
+        context.fillText(label as string, x as number, y as number);
+        context.fillStyle = "#15171a";
+      } else context.fillText(label as string, x as number, y as number);
+    });
+    context.font = `700 30px ${fontFamily}`;
+    context.fillText("QWERTY", width / 2, 430);
+  } else {
+    // Wi-Fi arcs, then a framed mountain at night.
+    for (let ring = 0; ring < 3; ring += 1) {
+      context.beginPath();
+      context.arc(width - 40, 48, 8 + ring * 9, Math.PI * 1.2, Math.PI * 1.8);
+      context.stroke();
+    }
+    context.strokeRect(18, 78, width - 36, height - 100);
+    context.beginPath();
+    context.moveTo(24, 400);
+    context.lineTo(100, 150);
+    context.lineTo(176, 400);
+    context.fill();
+    context.fillStyle = "#c9ccc4";
+    context.beginPath();
+    context.moveTo(100, 150);
+    context.lineTo(78, 222);
+    context.lineTo(100, 205);
+    context.lineTo(122, 222);
+    context.fill();
+    context.fillStyle = "#15171a";
+    for (let tree = 0; tree < 6; tree += 1) {
+      const x = 30 + tree * 28;
+      context.beginPath();
+      context.moveTo(x, 430);
+      context.lineTo(x + 13, 360 + (tree % 2) * 18);
+      context.lineTo(x + 26, 430);
+      context.fill();
+    }
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.flipY = false;
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  texture.generateMipmaps = false;
+  return texture;
+}
+
+/**
+ * An honours certificate printed from one education entry (Dean's List,
+ * Director's List). Text keeps to the left: the cap rests on the top-right
+ * corner and the 3D wax seal sits bottom right. Deliberately no crest or
+ * signature. Read on the 3D sheet itself, so it is drawn at 2x.
+ */
+function paintCertificate(item: ResumeItem, displayFamily: string, handFamily: string) {
+  const width = 1400;
+  const height = 1000;
+  const canvas = document.createElement("canvas");
+  canvas.width = width * 2;
+  canvas.height = height * 2;
+  const context = canvas.getContext("2d")!;
+  context.scale(2, 2);
+  context.fillStyle = "#f3eee3";
+  context.fillRect(0, 0, width, height);
+  // Double rule border in deep ink green.
+  context.strokeStyle = "#24493f";
+  context.lineWidth = 10;
+  context.strokeRect(46, 46, width - 92, height - 92);
+  context.lineWidth = 3;
+  context.strokeRect(70, 70, width - 140, height - 140);
+
+  const honour = item.bullets.find((line) => / list/i.test(line)) ?? item.bullets.at(-1) ?? "";
+  const [awardName, awardPeriod] = honour.split(" · ");
+  const left = 130;
+  const maxWidth = 760;
+  const line = (text: string, y: number, weight: number, size: number, family: string, colour: string) => {
+    if (!text) return;
+    context.fillStyle = colour;
+    context.font = `${weight} ${size}px ${family}`;
+    const fitted = Math.min(size, Math.floor(size * maxWidth / context.measureText(text).width));
+    context.font = `${weight} ${fitted}px ${family}`;
+    context.fillText(text, left, y);
+  };
+  context.textBaseline = "alphabetic";
+  line("CERTIFICATE OF ACHIEVEMENT", 190, 700, 34, displayFamily, "#24493f");
+  line(awardName, 330, 750, 132, displayFamily, "#1b1d24");
+  line(awardPeriod ?? "", 400, 500, 42, displayFamily, "#3b3f4a");
+  line("Awarded to", 500, 500, 34, displayFamily, "#6b6f78");
+  line(resumeData.profile.items[0]?.title ?? "Darren Ng Yijie", 590, 700, 92, handFamily, "#2c4f9e");
+  line(item.subtitle?.split(" · ")[0] ?? "", 670, 600, 36, displayFamily, "#3b3f4a");
+  line(item.title, 718, 500, 34, displayFamily, "#3b3f4a");
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.flipY = false;
+  return texture;
+}
+
+/**
+ * The phone's lock screen in Singapore time: wallpaper, date, clock and one
+ * notification. Repainted onto the same canvas when the minute changes.
+ */
+function paintPhoneScreen(canvas: HTMLCanvasElement, fontFamily: string, hours: number) {
+  const width = canvas.width;
+  const height = canvas.height;
+  const context = canvas.getContext("2d")!;
+  // Every line shrinks to fit its box, so nothing runs off the glass.
+  const fitText = (text: string, x: number, y: number, weight: number, size: number, maxWidth: number) => {
+    context.font = `${weight} ${size}px ${fontFamily}`;
+    const fitted = Math.min(size, Math.floor(size * maxWidth / context.measureText(text).width));
+    context.font = `${weight} ${fitted}px ${fontFamily}`;
+    context.fillText(text, x, y);
+  };
+  const wallpaper = context.createLinearGradient(0, 0, width * 0.4, height);
+  wallpaper.addColorStop(0, "#0b1424");
+  wallpaper.addColorStop(0.55, "#101a2c");
+  wallpaper.addColorStop(1, "#2a1a0c");
+  context.fillStyle = wallpaper;
+  context.fillRect(0, 0, width, height);
+  const lampGlow = context.createRadialGradient(width * 0.2, height * 1.02, 0, width * 0.2, height * 1.02, height * 0.65);
+  lampGlow.addColorStop(0, "rgba(242, 182, 109, 0.45)");
+  lampGlow.addColorStop(1, "rgba(242, 182, 109, 0)");
+  context.fillStyle = lampGlow;
+  context.fillRect(0, 0, width, height);
+  const screenGlow = context.createRadialGradient(width * 0.85, height * 0.05, 0, width * 0.85, height * 0.05, height * 0.5);
+  screenGlow.addColorStop(0, "rgba(111, 214, 230, 0.22)");
+  screenGlow.addColorStop(1, "rgba(111, 214, 230, 0)");
+  context.fillStyle = screenGlow;
+  context.fillRect(0, 0, width, height);
+
+  context.textAlign = "center";
+  context.textBaseline = "alphabetic";
+  context.fillStyle = "rgba(236, 231, 222, 0.82)";
+  fitText(sgtDateLabel(), width / 2, height * 0.165, 600, 52, width * 0.8);
+  context.fillStyle = "#ece7de";
+  fitText(formatSgt(hours).replace(/ [AP]M$/, ""), width / 2, height * 0.31, 750, 250, width * 0.84);
+
+  // One notification card: what picking the phone up gets you.
+  const left = width * 0.06;
+  const top = height * 0.52;
+  const cardWidth = width * 0.88;
+  const cardHeight = 230;
+  context.fillStyle = "rgba(236, 231, 222, 0.14)";
+  context.beginPath();
+  context.roundRect(left, top, cardWidth, cardHeight, 46);
+  context.fill();
+  context.fillStyle = "#f2b66d";
+  context.beginPath();
+  context.roundRect(left + 34, top + 40, 96, 96, 24);
+  context.fill();
+  context.fillStyle = "#1d1407";
+  fitText("DN", left + 82, top + 104, 750, 44, 80);
+  const textLeft = left + 160;
+  const textWidth = cardWidth - 160 - 40;
+  context.textAlign = "right";
+  context.fillStyle = "rgba(236, 231, 222, 0.62)";
+  fitText("now", left + cardWidth - 36, top + 80, 500, 34, 80);
+  context.textAlign = "left";
+  context.fillStyle = "#ece7de";
+  fitText("Darren Ng", textLeft, top + 82, 700, 44, textWidth - 100);
+  context.fillStyle = "rgba(236, 231, 222, 0.88)";
+  fitText("Open to SWE roles.", textLeft, top + 136, 500, 38, textWidth);
+  fitText("Pick me up to say hi.", textLeft, top + 184, 500, 38, textWidth);
+
+  context.fillStyle = "rgba(236, 231, 222, 0.75)";
+  context.beginPath();
+  context.roundRect(width / 2 - 140, height - 56, 280, 12, 6);
+  context.fill();
 }
 
 function paintPaper(punched: boolean) {
@@ -428,6 +967,14 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
   const robotHopRef = useRef(-1);
   const audioRef = useRef<WorkstationAudio | null>(null);
   const pickupRef = useRef<PickupState>({ phase: "idle", progress: 0, targetId: null });
+  // Turns the held project brief (set by the scene once the folder exists).
+  const turnProjectRef = useRef<((step: number) => void) | null>(null);
+  // Swaps which certificate is on top (set by the scene).
+  const turnCertificateRef = useRef<(() => void) | null>(null);
+  // Singapore time drives the window light; null until mounted so SSR and the
+  // first client render agree.
+  const [sgtHour, setSgtHour] = useState<number | null>(null);
+  const sgtHourRef = useRef(0);
 
   const activeHotspot = useMemo(() => hotspots.find((hotspot) => hotspot.id === activeId), [activeId]);
   const selectedHotspot = useMemo(() => hotspots.find((hotspot) => hotspot.id === selectedId), [selectedId]);
@@ -481,6 +1028,17 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
   }, [lampLevel]);
 
   useEffect(() => {
+    const tick = () => {
+      const hour = currentSgtHours();
+      sgtHourRef.current = hour;
+      setSgtHour(hour);
+    };
+    tick();
+    const interval = window.setInterval(tick, 30_000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
     const audio = createWorkstationAudio();
     audioRef.current = audio;
     return () => {
@@ -532,13 +1090,6 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
     pickupRef.current = { phase: "returning", progress: 0, targetId };
   }, []);
 
-  const openFromOverview = useCallback((node: SurfaceNode) => {
-    const target = hotspots.find((hotspot) => hotspot.node === node);
-    if (!target) return;
-    pendingPickRef.current = target;
-    closeSelection();
-  }, [closeSelection]);
-
   const skipIntro = useCallback(() => {
     introElapsedRef.current = Math.max(introElapsedRef.current, INTRO_SECONDS);
   }, []);
@@ -564,6 +1115,16 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
           step();
           return;
         }
+      }
+      if (selectedIdRef.current === "education" && pickupRef.current.phase === "held" && (event.key === "ArrowRight" || event.key === "ArrowLeft")) {
+        event.preventDefault();
+        turnCertificateRef.current?.();
+        return;
+      }
+      if (selectedIdRef.current === "projects" && pickupRef.current.phase === "held" && (event.key === "ArrowRight" || event.key === "ArrowLeft")) {
+        event.preventDefault();
+        turnProjectRef.current?.(event.key === "ArrowRight" ? 1 : -1);
+        return;
       }
       if (event.key !== "Escape" || !selectedIdRef.current) return;
       event.preventDefault();
@@ -598,9 +1159,10 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
     let introReported = false;
 
     const scene = new THREE.Scene();
-    const nightColor = new THREE.Color("#05070d");
-    scene.background = nightColor;
-    const fog = new THREE.FogExp2(nightColor, 0.022);
+    const daylight = daylightAt(sgtHourRef.current, createDaylight());
+    const airColor = daylight.air.clone();
+    scene.background = airColor;
+    const fog = new THREE.FogExp2(airColor, 0.022);
     scene.fog = fog;
 
     const camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 90);
@@ -620,8 +1182,8 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFShadowMap;
 
-    // Lighting: one warm lamp pool, moonlight from the window, screen spill.
-    const ambient = new THREE.HemisphereLight("#3a4a72", "#0b0709", 0.12);
+    // Lighting: one warm lamp pool, sun or moon from the window (by SGT), screen spill.
+    const ambient = new THREE.HemisphereLight(daylight.sky, daylight.ground, daylight.fill);
     scene.add(ambient);
     // Decay 1 (not physical 2) keeps the pool wide and soft instead of a hot spot.
     const lamp = new THREE.SpotLight("#ffc283", 0, 0, 1.22, 1, 1);
@@ -635,9 +1197,9 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
     lamp.shadow.normalBias = 0.02;
     lamp.shadow.radius = 4;
     scene.add(lamp, lamp.target);
-    const moon = new THREE.DirectionalLight("#7d9be0", 0.55);
-    moon.position.set(7, 9, -9);
-    scene.add(moon);
+    const windowLight = new THREE.DirectionalLight(daylight.light, daylight.intensity);
+    windowLight.position.copy(daylight.position);
+    scene.add(windowLight);
     const monitorGlow = new THREE.PointLight("#4fc3dc", 2.6, 0, 2);
     monitorGlow.position.set(-1.1, 3.0, -0.4);
     scene.add(monitorGlow);
@@ -691,7 +1253,8 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
     };
 
     // Scene references resolved after the GLB loads.
-    const loader = new GLTFLoader();
+    // The desk GLB is meshopt-compressed by `npm run optimize:desk`.
+    const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
     const textureLoader = new THREE.TextureLoader();
     const modelRoot = new THREE.Group();
     scene.add(modelRoot);
@@ -701,7 +1264,183 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
     let mountedModel: THREE.Object3D | null = null;
     let monitorMaterial: THREE.MeshBasicMaterial | null = null;
     let bulbMaterial: THREE.MeshStandardMaterial | null = null;
-    let notificationMaterial: THREE.MeshStandardMaterial | null = null;
+    // Lock screen in Singapore time, repainted when the minute changes.
+    const phoneCanvas = document.createElement("canvas");
+    phoneCanvas.width = 840;
+    phoneCanvas.height = 1800;
+    const phoneTexture = new THREE.CanvasTexture(phoneCanvas);
+    phoneTexture.colorSpace = THREE.SRGBColorSpace;
+    phoneTexture.flipY = false;
+    phoneTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    ownedTextures.add(phoneTexture);
+    let phoneFont = "sans-serif";
+    /**
+     * Page turns: a segmented copy of the sheet carrying the old page curls up
+     * and over its top edge (the far edge bends more than the hinge, so it
+     * reads as paper), while the new page already waits underneath.
+     */
+    type Flip = { mesh: THREE.Mesh; geometry: THREE.BufferGeometry; front: THREE.MeshStandardMaterial; back: THREE.MeshStandardMaterial; texture: THREE.Texture; t: number; width: number; depth: number; topZ: number; minX: number };
+    const flips: Flip[] = [];
+    const FLIP_SECONDS = 0.75;
+    const FLIP_ROWS = 28;
+    const startFlip = (sheet: THREE.Mesh, oldImage: HTMLCanvasElement | THREE.Texture) => {
+      if (reduced) return;
+      const geometrySource = sheet.geometry;
+      geometrySource.computeBoundingBox();
+      const box = geometrySource.boundingBox!;
+      // The hinge is the sheet's printed top edge: the end where uv.y is 0.
+      const uv = geometrySource.getAttribute("uv");
+      const position = geometrySource.getAttribute("position");
+      let topZ = box.min.z;
+      if (uv && position) {
+        let best = Infinity;
+        for (let index = 0; index < uv.count; index += 1) {
+          if (uv.getY(index) < best) {
+            best = uv.getY(index);
+            topZ = position.getZ(index);
+          }
+        }
+      }
+      const texture = oldImage instanceof THREE.Texture ? oldImage : new THREE.CanvasTexture(oldImage);
+      if (!(oldImage instanceof THREE.Texture)) {
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.flipY = false;
+      }
+      const geometry = new THREE.BufferGeometry();
+      const vertices = new Float32Array((FLIP_ROWS + 1) * 2 * 3);
+      const uvs = new Float32Array((FLIP_ROWS + 1) * 2 * 2);
+      const indices: number[] = [];
+      for (let row = 0; row <= FLIP_ROWS; row += 1) {
+        const v = row / FLIP_ROWS;
+        uvs.set([0, v, 1, v], row * 4);
+        if (row < FLIP_ROWS) {
+          const a = row * 2;
+          indices.push(a, a + 2, a + 1, a + 1, a + 2, a + 3);
+        }
+      }
+      geometry.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
+      geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+      geometry.setIndex(indices);
+      const sourceMaterial = sheet.material as THREE.MeshStandardMaterial;
+      // Printed front, plain paper back.
+      const front = new THREE.MeshStandardMaterial({ map: texture, color: sourceMaterial.color, roughness: 0.9, side: THREE.FrontSide });
+      const back = new THREE.MeshStandardMaterial({ color: "#c9c1b2", roughness: 0.92, side: THREE.BackSide });
+      const mesh = new THREE.Mesh(geometry, front);
+      const backMesh = new THREE.Mesh(geometry, back);
+      mesh.add(backMesh);
+      mesh.renderOrder = 2;
+      sheet.add(mesh);
+      const flip: Flip = { mesh, geometry, front, back, texture, t: 0, width: box.max.x - box.min.x, depth: box.max.z - box.min.z, topZ, minX: box.min.x };
+      flips.push(flip);
+      layFlip(flip, 0);
+    };
+    const layFlip = (flip: Flip, progress: number) => {
+      const eased = progress < 0.5 ? 4 * progress ** 3 : 1 - (-2 * progress + 2) ** 3 / 2;
+      const turn = Math.PI * eased;
+      const direction = flip.topZ < 0 ? 1 : -1; // from the hinge toward the bottom edge
+      const segment = flip.depth / FLIP_ROWS;
+      const attribute = flip.geometry.getAttribute("position") as THREE.BufferAttribute;
+      let y = 0.0015;
+      let z = flip.topZ;
+      for (let row = 0; row <= FLIP_ROWS; row += 1) {
+        attribute.setXYZ(row * 2, flip.minX, y, z);
+        attribute.setXYZ(row * 2 + 1, flip.minX + flip.width, y, z);
+        const angle = turn * (0.55 + 0.45 * (row / FLIP_ROWS)) * Math.min(1, 0.35 + progress * 2);
+        z += direction * segment * Math.cos(angle);
+        y += segment * Math.sin(angle);
+      }
+      attribute.needsUpdate = true;
+      flip.geometry.computeVertexNormals();
+      flip.geometry.computeBoundingSphere();
+    };
+    const tickFlips = (dt: number) => {
+      for (let index = flips.length - 1; index >= 0; index -= 1) {
+        const flip = flips[index];
+        flip.t += dt / FLIP_SECONDS;
+        if (flip.t >= 1) {
+          flip.mesh.removeFromParent();
+          flip.geometry.dispose();
+          flip.front.dispose();
+          flip.back.dispose();
+          if (!ownedTextures.has(flip.texture)) flip.texture.dispose();
+          flips.splice(index, 1);
+        } else layFlip(flip, flip.t);
+      }
+    };
+
+    /**
+     * Certificate swap: the two sheets trade places like papers on a desk. The
+     * top one slides out to the right and tucks in behind; the one beneath
+     * slides out to the left, rises and settles on top. Proxies carry the
+     * prints while the real sheets (and the seal) wait hidden.
+     */
+    type SwapSheet = { mesh: THREE.Mesh; from: THREE.Vector3; to: THREE.Vector3; fromQ: THREE.Quaternion; toQ: THREE.Quaternion; lateral: THREE.Vector3; lift: THREE.Vector3 };
+    let swap: { t: number; sheets: SwapSheet[]; hidden: THREE.Object3D[]; done: () => void } | null = null;
+    const SWAP_SECONDS = 0.85;
+    const startSwap = (top: THREE.Mesh, under: THREE.Mesh, topMap: THREE.Texture, underMap: THREE.Texture, hidden: THREE.Object3D[], done: () => void) => {
+      if (swap) return;
+      if (reduced) {
+        done();
+        return;
+      }
+      const sheetFor = (face: THREE.Mesh, map: THREE.Texture, toFace: THREE.Mesh, side: number, rise: number): SwapSheet => {
+        const material = new THREE.MeshStandardMaterial({ map, color: (face.material as THREE.MeshStandardMaterial).color, roughness: 0.9, side: THREE.DoubleSide });
+        const mesh = new THREE.Mesh(face.geometry, material);
+        mesh.scale.copy(face.scale);
+        face.parent!.add(mesh);
+        face.geometry.computeBoundingBox();
+        const width = (face.geometry.boundingBox!.max.x - face.geometry.boundingBox!.min.x) * face.scale.x;
+        return {
+          mesh,
+          from: face.position.clone(),
+          to: toFace.position.clone(),
+          fromQ: face.quaternion.clone(),
+          toQ: toFace.quaternion.clone(),
+          lateral: new THREE.Vector3(1, 0, 0).applyQuaternion(face.quaternion).multiplyScalar(width * 0.3 * side),
+          lift: new THREE.Vector3(0, 1, 0).applyQuaternion(face.quaternion).multiplyScalar(rise),
+        };
+      };
+      hidden.forEach((object) => { object.visible = false; });
+      swap = {
+        t: 0,
+        // Going behind: out to the right and back. Coming forward: out to the left and toward you.
+        sheets: [sheetFor(top, topMap, under, 1, -0.1), sheetFor(under, underMap, top, -1, 0.06)],
+        hidden,
+        done,
+      };
+      layoutSwap(0);
+    };
+    const layoutSwap = (progress: number) => {
+      if (!swap) return;
+      const eased = progress < 0.5 ? 4 * progress ** 3 : 1 - (-2 * progress + 2) ** 3 / 2;
+      const arc = Math.sin(Math.PI * progress);
+      swap.sheets.forEach((sheet) => {
+        sheet.mesh.position.lerpVectors(sheet.from, sheet.to, eased).addScaledVector(sheet.lateral, arc).addScaledVector(sheet.lift, arc);
+        sheet.mesh.quaternion.slerpQuaternions(sheet.fromQ, sheet.toQ, eased);
+      });
+    };
+    const tickSwap = (dt: number) => {
+      if (!swap) return;
+      swap.t += dt / SWAP_SECONDS;
+      if (swap.t < 1) {
+        layoutSwap(swap.t);
+        return;
+      }
+      swap.sheets.forEach((sheet) => {
+        sheet.mesh.removeFromParent();
+        (sheet.mesh.material as THREE.Material).dispose();
+      });
+      swap.hidden.forEach((object) => { object.visible = true; });
+      const finish = swap.done;
+      swap = null;
+      finish();
+    };
+
+    // The repo link printed on the current project brief, and that sheet's mesh.
+    let projectLink: LinkArea | null = null;
+    let briefMesh: THREE.Mesh | null = null;
+    let phoneMinute = -1;
+    let paneMaterial: THREE.MeshStandardMaterial | null = null;
     let cursorLine: THREE.Object3D | null = null;
     const decorObjects = new Map<string, THREE.Object3D[]>();
     const skillCaps = new Map<string, THREE.Mesh>();
@@ -823,7 +1562,10 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
         const robotParts: THREE.Object3D[] = [];
         mountedModel.traverse((object) => {
           if (object instanceof THREE.Mesh) {
-            object.castShadow = !object.name.startsWith("room-");
+            // The lamp sits behind the monitor's left side; its shadow would
+            // fall across the resume, so the monitor casts none. The lamp's
+            // light sits inside its own head, so its body casts none either.
+            object.castShadow = !/^(room-|overview-monitor|monitor-portfolio-screen|desk-lamp)/.test(object.name);
             object.receiveShadow = true;
           }
           if (object.name.startsWith("hotspot-root-")) {
@@ -868,7 +1610,7 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
           const texture = paintTape(hotspot.label, tapeFont);
           texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
           ownedTextures.add(texture);
-          ownMaterial(tape, new THREE.MeshStandardMaterial({ map: texture, alphaTest: 0.5, roughness: 0.92, side: THREE.DoubleSide }));
+          ownMaterial(tape, new THREE.MeshStandardMaterial({ map: texture, color: "#d9d2c6", alphaTest: 0.5, roughness: 0.92, side: THREE.DoubleSide }));
           tape.castShadow = false;
         });
 
@@ -907,29 +1649,152 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
           });
         }
 
-        // Paper grain on every sheet; the project brief also gets binder holes.
+        // Paper grain on every authored sheet. Scanned paper in the downloaded
+        // notebook and folder is near pure white, so it is toned to the same
+        // warm off-white and never clips under the lamp.
         const paperGrain = paintPaper(false);
-        const briefGrain = paintPaper(true);
-        [paperGrain, briefGrain].forEach((texture) => {
-          texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
-          ownedTextures.add(texture);
-        });
+        paperGrain.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        ownedTextures.add(paperGrain);
         const paperMaterials = new Set<THREE.MeshStandardMaterial>();
+        const scannedPaper = new Set<THREE.MeshStandardMaterial>();
         mountedModel.traverse((object) => {
-          if (object instanceof THREE.Mesh && object.material instanceof THREE.MeshStandardMaterial && object.material.name === "Warm Paper") {
-            paperMaterials.add(object.material);
-          }
+          if (!(object instanceof THREE.Mesh) || !(object.material instanceof THREE.MeshStandardMaterial)) return;
+          const name = object.material.name;
+          if (name === "Warm Paper") paperMaterials.add(object.material);
+          else if (/^(M_Paper|M_Pages|A4_)/.test(name)) scannedPaper.add(object.material);
         });
         paperMaterials.forEach((material) => {
           material.map = paperGrain;
+          // Sheets sit right under the lamp; keep them below clipping in daylight too.
+          material.color.multiplyScalar(0.82);
           material.roughness = 0.92;
           material.needsUpdate = true;
         });
+        // Room surfaces carry real plaster and concrete texture; tint them down
+        // to midnight so the desk stays the brightest thing in the frame.
+        mountedModel.traverse((object) => {
+          if (!(object instanceof THREE.Mesh) || !(object.material instanceof THREE.MeshStandardMaterial)) return;
+          if (object.material.name === "Midnight Plaster") object.material.color.set("#1e2534");
+          if (object.material.name === "Midnight Floor") object.material.color.set("#080a0e");
+          // The veneer scan is a light walnut; deepen it toward the real desk.
+          if (object.material.name === "Walnut Desk") object.material.color.set("#c4a084");
+        });
+        scannedPaper.forEach((material) => {
+          material.color.set("#c9c2b6");
+          material.roughness = Math.max(material.roughness, 0.85);
+        });
+        // Handwritten teaching notes on the notebook's two pages.
+        (["left", "right"] as const).forEach((side, index) => {
+          const page = mountedModel!.getObjectByName(`notebook-notes-${side}`);
+          if (!(page instanceof THREE.Mesh)) return;
+          const texture = new THREE.CanvasTexture(paintNotebookPage(resumeData.teaching.items[index], tapeFont));
+          texture.colorSpace = THREE.SRGBColorSpace;
+          texture.flipY = false;
+          texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+          ownedTextures.add(texture);
+          ownMaterial(page, new THREE.MeshStandardMaterial({ map: texture, color: "#d4cdc0", roughness: 0.9 }));
+        });
+
+        // PBT keycaps and a printed case: fine matte grain instead of smooth plastic.
+        const grain = paintGrainNormal();
+        ownedTextures.add(grain);
+        const grainy = new Set<THREE.MeshStandardMaterial>();
+        mountedModel.traverse((object) => {
+          if (!(object instanceof THREE.Mesh) || !(object.material instanceof THREE.MeshStandardMaterial)) return;
+          if (/^(keyboard-key|keyboard-thumb-key|keyboard-legend|keyboard-half|hotspot-skills-keyboard|keyboard-display-bezel)/.test(object.name)) grainy.add(object.material);
+        });
+        grainy.forEach((material) => {
+          // Fine and subtle: PBT caps a little coarser than the printed case,
+          // and the printed legend tops barely textured.
+          const casing = material.name === "Keyboard Base";
+          const legend = Boolean(material.map) && !casing;
+          material.normalMap = grain.clone();
+          material.normalMap.repeat.setScalar(casing ? 9 : 7);
+          material.normalScale.setScalar(casing ? 0.22 : legend ? 0.14 : 0.28);
+          material.roughness = Math.max(material.roughness, casing ? 0.62 : 0.7);
+          material.needsUpdate = true;
+          ownedTextures.add(material.normalMap);
+        });
+
+        // The project brief on the folder: one sheet per project, turned in the hand.
         const brief = mountedModel.getObjectByName("projects-brief");
         if (brief instanceof THREE.Mesh) {
-          ownMaterial(brief, new THREE.MeshStandardMaterial({ map: briefGrain, color: "#e3dccd", roughness: 0.92 }));
+          briefMesh = brief;
+          const projects = resumeData.projects.items;
+          const briefFamily = getComputedStyle(document.documentElement).getPropertyValue("--font-display").trim() || "sans-serif";
+          const briefCanvas = document.createElement("canvas");
+          briefCanvas.width = 2756;
+          briefCanvas.height = 2000;
+          const briefTexture = new THREE.CanvasTexture(briefCanvas);
+          briefTexture.colorSpace = THREE.SRGBColorSpace;
+          briefTexture.flipY = false;
+          briefTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+          ownedTextures.add(briefTexture);
+          let page = 0;
+          const paintPage = () => {
+            projectLink = paintProjectSheet(briefCanvas, projects[page], page, projects.length, briefFamily);
+            briefTexture.needsUpdate = true;
+          };
+          paintPage();
+          ownMaterial(brief, new THREE.MeshStandardMaterial({ map: briefTexture, color: "#d4cdc0", roughness: 0.9 }));
+          turnProjectRef.current = (step) => {
+            // Snapshot the page being turned, then print the next one underneath.
+            const snapshot = document.createElement("canvas");
+            snapshot.width = briefCanvas.width / 2;
+            snapshot.height = briefCanvas.height / 2;
+            snapshot.getContext("2d")!.drawImage(briefCanvas, 0, 0, snapshot.width, snapshot.height);
+            page = (page + step + projects.length) % projects.length;
+            paintPage();
+            startFlip(brief, snapshot);
+            audioRef.current?.rustle();
+          };
         }
 
+        // The Corne's two displays.
+        (["left", "right"] as const).forEach((side) => {
+          const panel = mountedModel!.getObjectByName(`keyboard-display-${side}`);
+          if (!(panel instanceof THREE.Mesh)) return;
+          const texture = paintKeyboardDisplay(side, getComputedStyle(document.documentElement).getPropertyValue("--font-display").trim() || "sans-serif");
+          texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+          ownedTextures.add(texture);
+          // Reflective panel: lit by the room, with a faint front light for night.
+          ownMaterial(panel, new THREE.MeshStandardMaterial({ map: texture, roughness: 0.45, emissive: "#ffffff", emissiveMap: texture, emissiveIntensity: 0.12 }));
+        });
+
+        // One certificate per school: SMU on top, Nanyang Poly beneath it.
+        const certificateFamily = getComputedStyle(document.documentElement).getPropertyValue("--font-display").trim() || "serif";
+        const certificateFaces: THREE.MeshStandardMaterial[] = [];
+        const certificateTextures: THREE.Texture[] = [];
+        resumeData.education.items.forEach((item, index) => {
+          const face = mountedModel!.getObjectByName(index === 0 ? "education-certificate-face" : `education-certificate-face-${index + 1}`);
+          if (!(face instanceof THREE.Mesh)) return;
+          const texture = paintCertificate(item, certificateFamily, tapeFont);
+          texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+          ownedTextures.add(texture);
+          certificateTextures.push(texture);
+          // Off-white like the resume, so the lamp never clips the sheet.
+          certificateFaces.push(ownMaterial(face, new THREE.MeshStandardMaterial({ map: texture, color: "#d4cdc0", roughness: 0.9 })));
+        });
+        // In the hand, a click brings the certificate underneath to the top.
+        const topCertificate = mountedModel.getObjectByName("education-certificate-face");
+        const underCertificate = mountedModel.getObjectByName("education-certificate-face-2");
+        const educationRoot = interactiveRoots.get("education");
+        turnCertificateRef.current = () => {
+          if (certificateFaces.length < 2 || !(topCertificate instanceof THREE.Mesh) || !(underCertificate instanceof THREE.Mesh)) return;
+          // The sheets, their prints and the seal hide while the proxies move.
+          const hidden: THREE.Object3D[] = [];
+          educationRoot?.traverse((object) => {
+            if (object !== educationRoot && /^education-(certificate|seal)/.test(object.name) && object.visible) hidden.push(object);
+          });
+          startSwap(topCertificate, underCertificate, certificateTextures[0], certificateTextures[1], hidden, () => {
+            certificateTextures.push(certificateTextures.shift()!);
+            certificateFaces.forEach((material, index) => {
+              material.map = certificateTextures[index];
+              material.needsUpdate = true;
+            });
+          });
+          audioRef.current?.rustle();
+        };
         const shade = mountedModel.getObjectByName("desk-lamp-shade");
         if (shade) shade.getWorldPosition(lamp.position);
         const bulb = mountedModel.getObjectByName("desk-lamp-bulb");
@@ -937,9 +1802,18 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
           bulbMaterial = ownMaterial(bulb, new THREE.MeshStandardMaterial({ color: "#ffe2b0", emissive: "#ffb867", emissiveIntensity: 0 }));
           bulb.castShadow = false;
         }
-        const notification = mountedModel.getObjectByName("phone-notification");
-        if (notification instanceof THREE.Mesh) {
-          notificationMaterial = ownMaterial(notification, new THREE.MeshStandardMaterial({ color: "#0f9fb3", emissive: "#3fd9ee", emissiveIntensity: 1.5 }));
+        const pane = mountedModel.getObjectByName("room-window-sky");
+        if (pane instanceof THREE.Mesh && pane.material instanceof THREE.MeshStandardMaterial) {
+          paneMaterial = ownMaterial(pane, pane.material.clone());
+          paneMaterial.emissive.copy(daylight.pane);
+          paneMaterial.emissiveIntensity = daylight.paneStrength;
+        }
+        const phoneScreen = mountedModel.getObjectByName("contact-phone-screen");
+        if (phoneScreen instanceof THREE.Mesh) {
+          phoneFont = getComputedStyle(document.documentElement).getPropertyValue("--font-display").trim() || "sans-serif";
+          phoneMinute = -1; // repaint with the display font, now that it has loaded
+          // The source's screen normals point into the phone: draw both sides.
+          ownMaterial(phoneScreen, new THREE.MeshStandardMaterial({ map: phoneTexture, emissive: "#ffffff", emissiveMap: phoneTexture, emissiveIntensity: 0.85, roughness: 0.3, side: THREE.DoubleSide }));
         }
         interactiveRoots.forEach((interactiveRoot, id) => {
           const prefixes = heldDecor[id] ?? [];
@@ -969,15 +1843,18 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
         robotHead = robotGroup.getObjectByName("guide-robot-head") ?? null;
         if (robotHead) robotHead.rotation.order = "YXZ";
         robotGroup.traverse((object) => {
-          if (object.name.startsWith("guide-robot-eye")) robotEyes.push(object);
+          if (object.name.startsWith("guide-robot-eye")) {
+            // Compressed meshes carry their dequantisation in the node scale: blink relative to it.
+            object.userData.baseScaleY = object.scale.y;
+            robotEyes.push(object);
+          }
         });
 
         // Keep artwork out of the GLB image table. This avoids blob URL races
         // when the hub unmounts and makes both planes use one predictable loader.
         const monitorScreen = mountedModel.getObjectByName("monitor-portfolio-screen");
         if (monitorScreen instanceof THREE.Mesh) {
-          const displayFamily = getComputedStyle(document.documentElement).getPropertyValue("--font-display").trim() || "sans-serif";
-          const screenTexture = paintOverviewScreen(displayFamily);
+          const screenTexture = paintWallpaper(getComputedStyle(document.documentElement).getPropertyValue("--font-display").trim() || "sans-serif");
           screenTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
           ownedTextures.add(screenTexture);
           monitorMaterial = ownMaterial(monitorScreen, new THREE.MeshBasicMaterial({ map: screenTexture, side: THREE.DoubleSide }));
@@ -1130,6 +2007,20 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
         }
       }
       const hit = pick(event.clientX, event.clientY);
+      if (selectedIdRef.current === "projects" && pickupRef.current.phase === "held" && hit && hit !== "robot" && hit.id === "projects") {
+        // The printed repo link opens the repo; anywhere else turns the page.
+        const uv = briefMesh ? raycaster.intersectObject(briefMesh, false)[0]?.uv : undefined;
+        if (uv && projectLink && uv.x >= projectLink.u0 && uv.x <= projectLink.u1 && uv.y >= projectLink.v0 && uv.y <= projectLink.v1) {
+          window.open(projectLink.href, "_blank", "noopener");
+          return;
+        }
+        turnProjectRef.current?.(1);
+        return;
+      }
+      if (selectedIdRef.current === "education" && pickupRef.current.phase === "held" && hit && hit !== "robot" && hit.id === "education") {
+        turnCertificateRef.current?.();
+        return;
+      }
       if (selectedIdRef.current) {
         // Clicking the background puts the artifact back; clicking another
         // object puts this one back and then picks that one up.
@@ -1179,6 +2070,8 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
     let visible = true;
     let frame = 0;
     let lastTime = performance.now();
+    let daylightClock = 0;
+    let fill = daylight.fill;
     let clock = 0;
 
     const render = (time: number) => {
@@ -1350,8 +2243,17 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
       if (decorFor !== decorHiddenFor) {
         if (decorHiddenFor) decorObjects.get(decorHiddenFor)?.forEach((object) => { object.visible = true; });
         if (decorFor) decorObjects.get(decorFor)?.forEach((object) => { object.visible = false; });
+        // In the hand, an artifact is out of the desk's shadows (otherwise the
+        // lamp prints the laptop and keyboard across a held phone's screen).
+        const setReceive = (id: string | null, receive: boolean) => {
+          if (!id) return;
+          interactiveRoots.get(id)?.traverse((object) => {
+            if (object instanceof THREE.Mesh) object.receiveShadow = receive;
+          });
+        };
+        setReceive(decorHiddenFor, true);
+        setReceive(decorFor, false);
         const screenHeld = decorFor === "work" || decorFor === "contact";
-        if (monitorMaterial) monitorMaterial.color.setScalar(decorFor === "overview" ? 0 : 1);
         screenMaterials.forEach((material) => {
           material.emissiveIntensity = screenHeld ? 0 : (material.userData.baseEmissive as number);
           material.color.copy(screenHeld ? offScreen : (material.userData.baseColor as THREE.Color));
@@ -1364,7 +2266,7 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
       // Lay the content over the held artifact's reading surface. The surface
       // faces the camera, so its projected corners form a screen rectangle.
       const surfaceElement = surfaceRef.current;
-      const overlaid = pickup.targetId !== "profile" && pickup.targetId !== "skills";
+      const overlaid = !READ_IN_PLACE.has(pickup.targetId as SurfaceNode);
       const heldRoot = pickup.phase === "held" && pickup.targetId && overlaid ? interactiveRoots.get(pickup.targetId) : undefined;
       const heldSurface = heldRoot?.userData.surface as ReadingSurface | undefined;
       if (surfaceElement && heldRoot && heldSurface) {
@@ -1397,22 +2299,55 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
         surfaceElement.dataset.visible = "false";
       }
 
+      tickFlips(dt);
+      tickSwap(dt);
+
+      // The phone's lock-screen clock ticks with Singapore time.
+      const phoneNow = Math.floor(sgtHourRef.current * 60);
+      if (phoneNow !== phoneMinute) {
+        phoneMinute = phoneNow;
+        paintPhoneScreen(phoneCanvas, phoneFont, sgtHourRef.current);
+        phoneTexture.needsUpdate = true;
+      }
+
+      // Window light follows Singapore time; checked every few seconds since
+      // it changes over minutes, and eased so a jump (e.g. after a sleeping
+      // tab wakes) fades rather than snaps.
+      daylightClock -= dt;
+      if (daylightClock <= 0) {
+        daylightClock = 5;
+        daylightAt(sgtHourRef.current, daylight);
+      }
+      const daylightEase = 1 - Math.exp(-dt * 1.5);
+      windowLight.color.lerp(daylight.light, daylightEase);
+      windowLight.intensity += (daylight.intensity - windowLight.intensity) * daylightEase;
+      windowLight.position.lerp(daylight.position, daylightEase);
+      ambient.color.lerp(daylight.sky, daylightEase);
+      ambient.groundColor.lerp(daylight.ground, daylightEase);
+      airColor.lerp(daylight.air, daylightEase);
+      fog.color.copy(airColor);
+      fill += (daylight.fill - fill) * daylightEase;
+      if (paneMaterial) {
+        paneMaterial.emissive.lerp(daylight.pane, daylightEase);
+        paneMaterial.emissiveIntensity += (daylight.paneStrength - paneMaterial.emissiveIntensity) * daylightEase;
+      }
+
       // Lights: the lamp dims a little while an artifact is held up to you.
       const lampLevel = (introDone ? 1 : lampCurve(introSeconds)) * (1 - 0.4 * pickupEase) * lampLevelRef.current;
       lamp.intensity = LAMP_INTENSITY * lampLevel;
       bounce.intensity = 1.3 * lampLevel;
-      ambient.intensity = 0.12 + 0.36 * (introDone ? 1 : lampCurve(introSeconds));
+      ambient.intensity = fill + 0.36 * (introDone ? 1 : lampCurve(introSeconds));
       inspectLight.intensity = 22 * pickupEase;
       if (bulbMaterial) bulbMaterial.emissiveIntensity = 7 * lampLevel;
-      finish.uniforms.uStrength.value = 0.42 + 0.22 * pickupEase;
+      // A heavier vignette by day keeps darkness around the desk while the room is lit.
+      finish.uniforms.uStrength.value = 0.42 + 0.22 * pickupEase + Math.max(0, fill - 0.12) * 0.9;
       finish.uniforms.uTime.value = reduced ? 0 : clock;
 
       // Ambient life (frozen for reduced motion).
       if (!reduced) {
         const flicker = 0.95 + 0.03 * Math.sin(clock * 7.3) + (Math.sin(clock * 0.7) > 0.995 ? -0.25 : 0);
-        if (monitorMaterial) monitorMaterial.color.setScalar(decorHiddenFor === "overview" ? 0 : flicker);
+        if (monitorMaterial) monitorMaterial.color.setScalar(flicker);
         monitorGlow.intensity = 2.6 * flicker;
-        if (notificationMaterial) notificationMaterial.emissiveIntensity = 1.1 + 0.9 * (0.5 + 0.5 * Math.sin(clock * 2.4));
         if (cursorLine && decorHiddenFor !== "work") cursorLine.visible = (clock * 1.9) % 1 < 0.55;
 
         for (let index = 0; index < dustCount; index += 1) {
@@ -1459,7 +2394,7 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
         robotHead.rotation.x += (pitch - robotHead.rotation.x) * alpha;
         const blink = !reduced && (clock % 4.2) < 0.12 ? 0.15 : 1;
         robotEyes.forEach((eye) => {
-          eye.scale.y = blink;
+          eye.scale.y = (eye.userData.baseScaleY as number) * blink;
         });
         if (robotHopRef.current >= 0) {
           robotHopRef.current += dt / 0.55;
@@ -1567,6 +2502,10 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
       : touchFirst ? "Tap a key to see where I used it" : "Point at a key to see where I used it"
     : selectedHotspot?.id === "profile"
     ? "Scroll to read, pinch to zoom"
+    : selectedHotspot?.id === "projects"
+    ? "Click the page or use ← → to turn it · click outside to put it back"
+    : selectedHotspot?.id === "education"
+    ? "Click the certificate or use ← → to see the other one"
     : selectedHotspot
     ? `${selectedHotspot.label} in hand · click outside to put it back`
     : activeHotspot
@@ -1582,10 +2521,10 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
       ref={rootRef}
       data-screen-label="Three-dimensional workstation hub"
     >
-      <div className="workstation-stage" aria-label="Darren's desk at night, with seven objects you can pick up">
+      <div className="workstation-stage" aria-label={`Darren's desk ${sgtHour === null || partOfDay(sgtHour) === "night" ? "at night" : `in the ${partOfDay(sgtHour)}`}, with seven objects you can pick up`}>
         {!introComplete && status === "ready" ? (
           <div className="workstation-intro" aria-live="polite">
-            <span className="eyebrow">11:47 PM · Singapore</span>
+            <span className="eyebrow">{sgtHour === null ? "Singapore" : `${formatSgt(sgtHour)} · Singapore`}</span>
             <strong>Switching on the lamp.</strong>
             <button type="button" onClick={skipIntro}>Skip <span aria-hidden="true">→</span></button>
           </div>
@@ -1679,10 +2618,10 @@ export function WorkstationHub({ onSelectionChange, onReturn }: WorkstationHubPr
         data-visible="false"
         ref={surfaceRef}
       >
-        {selectedHotspot && selectedHotspot.node !== "profile" && selectedHotspot.node !== "skills" ? <ObjectSurface node={selectedHotspot.node} onClose={closeSelection} onOpen={openFromOverview} /> : null}
+        {selectedHotspot && !READ_IN_PLACE.has(selectedHotspot.node) ? <ObjectSurface node={selectedHotspot.node} onClose={closeSelection} /> : null}
       </div>
       {/* The resume and keyboard are read on the 3D objects themselves; screen readers get the text. */}
-      {selectedHotspot?.node === "profile" || selectedHotspot?.node === "skills" ? (
+      {selectedHotspot && READ_IN_PLACE.has(selectedHotspot.node) ? (
         <div className="visually-hidden">
           <ObjectSurface node={selectedHotspot.node} onClose={closeSelection} />
         </div>

@@ -7,11 +7,12 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "lint": "npm run typecheck"
+    "lint": "npm run typecheck",
+    "build:desk": "/Applications/Blender.app/Contents/MacOS/Blender --background --python scripts/generate_workstation.py && npm run optimize:desk",
+    "optimize:desk": "gltf-transform optimize model-sources/workstation.raw.glb public/assets/workstation.glb --compress meshopt --texture-compress webp --texture-size 2048 --simplify false --join false --flatten false --instance false --palette false --prune-attributes false"
   },
   "dependencies": {
     "@types/three": "^0.185.4",
-    "gsap": "^3.15.0",
     "next": "^16.3.2",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
@@ -19,6 +20,7 @@
     "three": "^0.185.1"
   },
   "devDependencies": {
+    "@gltf-transform/cli": "^4.2.1",
     "@types/node": "^26.2.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",

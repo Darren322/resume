@@ -4073,6 +4073,7 @@ body {
 
 /* The workbench is the landing scene, not a card inside a résumé layout. */
 .landing-focus {
+  width: 100%;
   min-height: 100dvh;
   padding: 0;
 }
@@ -4093,10 +4094,7 @@ body {
 .landing-focus .topbar > * { pointer-events: auto; }
 .landing-focus .main-layout { display: block; height: 100dvh; }
 .landing-focus .studio-card { height: 100dvh; min-height: 100dvh; border: 0; border-radius: 0; box-shadow: none; background: transparent; }
-.landing-focus .studio-header,
-.landing-focus .studio-footer,
-.landing-focus .navigator-card{ display: none; }
-.landing-focus .world-frame { height: 100%; margin: 0; }
+.landing-focus .world-frame { height: 100%; margin: 0; border: 0; border-radius: 0; box-shadow: none; }
 .landing-focus .workstation-hub { height: 100%; min-height: 100dvh; }
 
 .workstation-hub { min-height: 100dvh; }
@@ -4408,8 +4406,8 @@ body {
 
 /* Desktop navigates through the desk itself; the dock is the phone (and fallback) TOC. */
 .midnight .workstation-mobile-destinations { display: none; }
-.midnight[data-status="fallback"] .workstation-mobile-destinations,
-.midnight[data-status="loading"] .workstation-mobile-destinations { display: grid; bottom: 80px; }
+/* Desktop only needs the section list when the 3D desk cannot load. */
+.midnight[data-status="fallback"] .workstation-mobile-destinations { display: grid; bottom: 80px; }
 .midnight .workstation-mobile-destinations button { color: var(--desk-ink); background: transparent; border-radius: 8px; }
 .midnight .workstation-mobile-destinations button:hover,
 .midnight .workstation-mobile-destinations button:focus-visible { color: var(--desk-ink); background: rgba(255, 190, 122, 0.12); outline: 2px solid var(--desk-amber); outline-offset: -2px; }
@@ -5086,27 +5084,6 @@ body { font-family: var(--font-ui); }
 .obj-phone-dock { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: auto; padding: 12px; border-radius: 30px; background: rgba(255, 255, 255, 0.16); backdrop-filter: blur(14px); }
 .obj-phone-home { position: static; width: 36%; height: 5px; margin: 0 auto; border-radius: 3px; background: rgba(255, 255, 255, 0.75); }
 
-/* Monitor → At a glance. One idea per row; the results are the loudest thing. */
-.obj-overview { display: grid; grid-template-rows: auto auto 1fr auto; gap: clamp(10px, 2cqi, 22px); padding: clamp(18px, 3.4cqi, 44px) clamp(20px, 4cqi, 56px); overflow-y: auto; color: var(--text); background: #000; }
-.obj-overview-head h2 { margin: 0; font-size: clamp(30px, 5.6cqi, 76px); font-stretch: 82%; font-weight: 750; line-height: 0.95; letter-spacing: -0.02em; }
-.obj-overview-head p { max-width: 60ch; margin: 8px 0 0; color: #c9ced8; font-size: clamp(14px, 1.6cqi, 19px); line-height: 1.4; }
-.obj-overview-facts { display: flex; flex-wrap: wrap; gap: 6px 28px; }
-.obj-overview-facts p { margin: 0; color: var(--text); font-size: clamp(13px, 1.4cqi, 17px); }
-.obj-overview-facts span { margin-right: 8px; color: var(--muted); }
-.obj-overview-results { display: grid; grid-template-columns: repeat(3, 1fr); gap: clamp(10px, 2cqi, 28px); align-content: center; margin: 0; padding: 0; list-style: none; }
-.obj-overview-results button { display: grid; width: 100%; height: 100%; align-content: start; gap: 6px; padding: clamp(12px, 1.8cqi, 22px); border: 1px solid rgba(236, 231, 222, 0.12); border-radius: 12px; color: inherit; background: rgba(236, 231, 222, 0.04); text-align: left; }
-.obj-overview-results button:hover { border-color: var(--lamp); background: rgba(242, 182, 109, 0.08); }
-.obj-overview-results strong { color: var(--lamp); font-size: clamp(26px, 4.4cqi, 60px); font-stretch: 85%; font-weight: 750; line-height: 1; }
-.obj-overview-results span { color: #d8dce4; font-size: clamp(13px, 1.3cqi, 16px); line-height: 1.35; }
-.obj-overview-results small { color: var(--muted); font-size: clamp(12px, 1.1cqi, 14px); }
-.obj-overview-jump { display: flex; flex-wrap: wrap; gap: 8px; }
-.obj-overview-jump button { min-height: 40px; padding: 0 16px; border: 1px solid rgba(236, 231, 222, 0.16); border-radius: 999px; color: var(--text); background: transparent; font-size: 14px; font-weight: 600; }
-.obj-overview-jump button:first-child { border-color: var(--lamp); color: #1d1407; background: var(--lamp); }
-.obj-overview-jump button:hover { border-color: var(--lamp); }
-@container surface (max-width: 640px) {
-  .obj-overview-results { grid-template-columns: 1fr; }
-}
-
 /* View controls tuck away into one corner button. */
 .workstation-controls-hide,
 .workstation-controls-toggle { display: grid; place-items: center; border: 1px solid var(--desk-edge); border-radius: 999px; color: var(--text); background: rgba(255, 255, 255, 0.05); cursor: pointer; }
@@ -5119,3 +5096,78 @@ body { font-family: var(--font-ui); }
 @media (max-width: 720px) {
   .workstation-controls-toggle { top: 72px; right: 10px; }
 }
+/* ───────────────────────────────────────────────────────────────────────────
+   Quick resume and control manual: the same dark glass as the desk chrome.
+   Lamp amber marks structure; screen aqua stays reserved for focus.
+   ─────────────────────────────────────────────────────────────────────────── */
+.resume-shell,
+.help-shell {
+  border-color: rgba(231, 240, 255, 0.12);
+  color: var(--text);
+  background: #0a0e17;
+  box-shadow: 0 50px 160px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.help-shell::before { display: none; }
+.resume-header {
+  border-bottom-color: rgba(231, 240, 255, 0.09);
+  background: rgba(10, 14, 23, 0.92);
+}
+.resume-contact { border-bottom-color: rgba(231, 240, 255, 0.09); }
+.resume-shell .eyebrow,
+.help-shell .eyebrow {
+  color: var(--lamp);
+  font: 600 13px/1.2 var(--font-ui);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.resume-header p:last-child { color: var(--muted); }
+.resume-profile-summary { color: #c4cad3 !important; }
+.resume-contact a {
+  color: var(--text);
+  font-family: var(--font-ui);
+  text-decoration: underline;
+  text-decoration-color: rgba(242, 182, 109, 0.35);
+  text-underline-offset: 4px;
+}
+.resume-contact a:hover { color: var(--lamp); text-decoration-color: var(--lamp); }
+.resume-section-title {
+  color: var(--lamp);
+  font: 650 13px/1.2 var(--font-ui);
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+.resume-section-title::after { background: rgba(231, 240, 255, 0.08); }
+.resume-entry-subtitle { color: #d6cfc4; }
+.resume-entry-period { font-family: var(--font-ui); font-size: 12px; }
+.resume-entry ul { color: #aab3c0; }
+.resume-entry li::marker { color: var(--lamp-deep); }
+.skills-group strong { font-family: var(--font-ui); }
+.resume-tags > .resume-tag {
+  border-color: rgba(231, 240, 255, 0.1);
+  color: #d4d9e0;
+  background: rgba(255, 255, 255, 0.035);
+  font-family: var(--font-ui);
+}
+.resume-shell .button-quiet,
+.resume-shell .icon-button,
+.help-shell .icon-button {
+  border-color: rgba(231, 240, 255, 0.14);
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.03);
+}
+.resume-shell .button-quiet:hover,
+.resume-shell .icon-button:hover,
+.help-shell .icon-button:hover { border-color: var(--lamp); color: var(--lamp); background: rgba(242, 182, 109, 0.08); }
+.help-shell h2 { font-family: var(--font-ui); }
+.help-grid > div {
+  border-color: rgba(231, 240, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+}
+.help-grid kbd { color: var(--lamp); font-family: var(--font-ui); letter-spacing: 0; text-transform: none; }
+.help-grid span { color: var(--muted); }
+.model-credits { margin-top: 18px; color: var(--muted); font-size: 12px; }
+.model-credits summary { cursor: pointer; color: var(--text); font-size: 13px; }
+.model-credits summary:hover { color: var(--lamp); }
+.model-credits ul { margin: 10px 0 0; padding-left: 16px; line-height: 1.7; }
+.model-credits a { color: var(--text); text-decoration-color: rgba(242, 182, 109, 0.4); text-underline-offset: 3px; }
+.model-credits a:hover { color: var(--lamp); }

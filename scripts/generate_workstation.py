@@ -3,8 +3,12 @@
 Run with Blender 5.2 in background mode:
   Blender --background --python scripts/generate_workstation.py
 
-The scene deliberately uses authored primitives and shared materials so the GLB
-stays small, reproducible, and independent of external textures or trademarks.
+Most furniture is authored from primitives. The lamp, monitor, laptop, phone,
+mug, project folder, notebook and graduation cap are CC-BY Sketchfab models read from
+`model-sources/` (gitignored; see `model-sources/CREDITS.tsv` and the site
+credits). They are re-oriented, scaled into the desk's units and renamed to
+the names the runtime looks up. Run `npm run optimize:desk` afterwards to
+shrink textures and compress geometry.
 
 Composition notes (the runtime camera looks down at ~63°):
 - Everything a visitor should read lies flat or leans back, because an upright
@@ -18,11 +22,13 @@ Composition notes (the runtime camera looks down at ~63°):
 from pathlib import Path
 import bpy
 import math
-from mathutils import Euler, Vector
+from mathutils import Euler, Matrix, Vector
 
 
 ROOT = Path(__file__).resolve().parents[1]
-OUTPUT = ROOT / "public" / "assets" / "workstation.glb"
+SOURCES = ROOT / "model-sources"
+# Raw export (textures at source size); `npm run optimize:desk` writes public/assets/workstation.glb.
+OUTPUT = SOURCES / "workstation.raw.glb"
 DESK_TOP = 1.64
 
 
@@ -40,33 +46,63 @@ def material(name, color, metallic=0.0, roughness=0.55, emission=None, strength=
     return mat
 
 
-NIGHT = material("Midnight Room", (0.018, 0.024, 0.045), metallic=0.0, roughness=0.92)
-WALNUT = material("Walnut Desk", (0.3, 0.15, 0.085), metallic=0.02, roughness=0.62)
 SLATE = material("Graphite", (0.045, 0.055, 0.075), metallic=0.4, roughness=0.38)
 ALUMINIUM = material("Aluminium", (0.4, 0.42, 0.46), metallic=0.45, roughness=0.5)
 AQUA = material("Aqua", (0.06, 0.62, 0.72), metallic=0.2, roughness=0.28, emission=(0.04, 0.48, 0.6), strength=0.7)
 EYE = material("Robot Eye", (0.3, 0.95, 1.0), metallic=0.0, roughness=0.2, emission=(0.2, 0.9, 1.0), strength=3.0)
-KEYCAP = material("Keycap", (0.13, 0.15, 0.19), metallic=0.1, roughness=0.55)
-SCREEN = material("Screen Glow", (0.02, 0.09, 0.12), metallic=0.0, roughness=0.6, emission=(0.05, 0.32, 0.42), strength=0.55)
 AMBER = material("Coral Amber", (0.92, 0.28, 0.12), metallic=0.12, roughness=0.35, emission=(0.7, 0.12, 0.03), strength=0.5)
 PAPER = material("Warm Paper", (0.86, 0.8, 0.7), metallic=0.0, roughness=0.86)
 MANILA = material("Manila", (0.6, 0.45, 0.25), metallic=0.0, roughness=0.8)
-TEAL_FOLDER = material("Teal Folder", (0.05, 0.36, 0.38), metallic=0.0, roughness=0.7)
-CORAL_FOLDER = material("Coral Folder", (0.72, 0.24, 0.16), metallic=0.0, roughness=0.7)
-RUBBER = material("Rubber", (0.04, 0.035, 0.04), metallic=0.0, roughness=0.8)
 CERAMIC = material("Ceramic", (0.82, 0.8, 0.76), metallic=0.0, roughness=0.35)
-COFFEE = material("Coffee", (0.09, 0.045, 0.02), metallic=0.0, roughness=0.15)
-LAMP_METAL = material("Lamp Enamel", (0.04, 0.2, 0.22), metallic=0.55, roughness=0.32)
 BULB = material("Bulb", (1.0, 0.82, 0.55), metallic=0.0, roughness=0.3, emission=(1.0, 0.72, 0.38), strength=6.0)
 NIGHT_SKY = material("Night Window", (0.01, 0.025, 0.06), metallic=0.0, roughness=0.5, emission=(0.03, 0.07, 0.16), strength=1.2)
 TAPE = material("Masking Tape", (0.86, 0.78, 0.6), metallic=0.0, roughness=0.9)
 KEYCAP_BLUE = material("Cyan Blue Keycap", (0.016, 0.38, 0.69), metallic=0.05, roughness=0.4)
 KEYBOARD_BASE = material("Keyboard Base", (0.012, 0.012, 0.016), metallic=0.2, roughness=0.5)
+SWITCH = material("Switch Housing", (0.62, 0.64, 0.66), metallic=0.0, roughness=0.35)
+DISPLAY = material("Keyboard Display", (0.62, 0.64, 0.6), metallic=0.0, roughness=0.4)
 SURFACE = material("Reading Surface", (1.0, 0.0, 1.0), metallic=0.0, roughness=1.0)
-PHONE_FRAME = material("Cosmic Orange Frame", (0.85, 0.24, 0.05), metallic=0.85, roughness=0.32)
-GLASS_BLACK = material("Black Glass", (0.004, 0.004, 0.006), metallic=0.0, roughness=0.38)
-SPACE_BLACK = material("Space Black", (0.032, 0.033, 0.037), metallic=0.6, roughness=0.36)
-MAC_KEY = material("Mac Key", (0.008, 0.008, 0.009), metallic=0.0, roughness=0.62)
+
+
+def pbr_material(name, stem):
+    """A Principled material from a Poly Haven (CC0) texture set in
+    model-sources/textures: colour, OpenGL normal map, and the packed
+    AO/roughness/metal map (G = roughness, B = metallic), as glTF expects."""
+    folder = SOURCES / "textures"
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    nodes, links = mat.node_tree.nodes, mat.node_tree.links
+    principled = nodes.get("Principled BSDF")
+
+    def image(suffix, colour):
+        node = nodes.new("ShaderNodeTexImage")
+        node.image = bpy.data.images.load(str(next(folder.glob(f"{stem}_{suffix}_*.jpg"))))
+        node.image.colorspace_settings.name = "sRGB" if colour else "Non-Color"
+        return node
+
+    links.new(image("diff", True).outputs["Color"], principled.inputs["Base Color"])
+    normal_map = nodes.new("ShaderNodeNormalMap")
+    links.new(image("nor_gl", False).outputs["Color"], normal_map.inputs["Color"])
+    links.new(normal_map.outputs["Normal"], principled.inputs["Normal"])
+    separate = nodes.new("ShaderNodeSeparateColor")
+    links.new(image("arm", False).outputs["Color"], separate.inputs["Color"])
+    links.new(separate.outputs["Green"], principled.inputs["Roughness"])
+    links.new(separate.outputs["Blue"], principled.inputs["Metallic"])
+    return mat
+
+
+def box_uv(obj, tile):
+    """World-space box projection: each face takes UVs from the two axes it
+    lies across, one texture repeat every `tile` desk units."""
+    mesh = obj.data
+    uv = mesh.uv_layers.active or mesh.uv_layers.new()
+    for polygon in mesh.polygons:
+        normal = polygon.normal
+        axis = max(range(3), key=lambda index: abs(normal[index]))
+        u_axis, v_axis = {0: (1, 2), 1: (0, 2), 2: (0, 1)}[axis]
+        for loop_index in polygon.loop_indices:
+            co = obj.matrix_world @ mesh.vertices[mesh.loops[loop_index].vertex_index].co
+            uv.data[loop_index].uv = (co[u_axis] / tile, co[v_axis] / tile)
 
 
 def apply_material(obj, mat):
@@ -212,6 +248,101 @@ def parent_keep_world(child, parent):
     child.location = world - parent.location
 
 
+def select_only(objs):
+    bpy.ops.object.select_all(action="DESELECT")
+    for obj in objs:
+        obj.select_set(True)
+    bpy.context.view_layer.objects.active = objs[0]
+
+
+def bake(objs):
+    """Apply object transforms into mesh data (custom normals included)."""
+    select_only(objs)
+    bpy.ops.object.make_single_user(type="SELECTED_OBJECTS", object=True, obdata=True)
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+
+
+def transform(objs, matrix):
+    for obj in objs:
+        obj.matrix_world = matrix @ obj.matrix_world
+    bake(objs)
+
+
+def bounds(objs):
+    points = [obj.matrix_world @ vertex.co for obj in objs for vertex in obj.data.vertices]
+    low = Vector((min(p.x for p in points), min(p.y for p in points), min(p.z for p in points)))
+    high = Vector((max(p.x for p in points), max(p.y for p in points), max(p.z for p in points)))
+    return low, high
+
+
+def import_model(file, rotation=(0, 0, 0), drop=()):
+    """Import a downloaded glTF, keep only its meshes (minus `drop` name
+    fragments), and bake its node transforms plus `rotation` (degrees, XYZ).
+    The result lives in world space with identity object transforms."""
+    before = set(bpy.data.objects)
+    bpy.ops.import_scene.gltf(filepath=str(SOURCES / file))
+    imported = [obj for obj in bpy.data.objects if obj not in before]
+    meshes = [
+        obj for obj in imported
+        if obj.type == "MESH"
+        and not any(part in obj.name for part in drop)
+        and not any(modifier.type == "ARMATURE" for modifier in obj.modifiers)
+    ]
+    for obj in meshes:
+        world = obj.matrix_world.copy()
+        obj.parent = None
+        obj.matrix_world = world
+        for modifier in list(obj.modifiers):
+            obj.modifiers.remove(modifier)
+    for obj in imported:
+        if obj not in meshes:
+            bpy.data.objects.remove(obj, do_unlink=True)
+    transform(meshes, Euler(tuple(math.radians(angle) for angle in rotation)).to_matrix().to_4x4())
+    return meshes
+
+
+def fit(objs, axis, size, place, stretch=(1, 1, 1), points=()):
+    """Scale uniformly so the bounding box measures `size` along `axis` (then
+    apply `stretch`), and move its footprint centre to `place=(x, y, bottom_z)`.
+    Returns `points` carried through the same transform."""
+    low, high = bounds(objs)
+    scale = size / (high - low)["xyz".index(axis)]
+    centre = Vector(((low.x + high.x) / 2, (low.y + high.y) / 2, low.z))
+    matrix = (
+        Matrix.Translation(Vector(place))
+        @ Matrix.Diagonal((scale * stretch[0], scale * stretch[1], scale * stretch[2], 1))
+        @ Matrix.Translation(-centre)
+    )
+    transform(objs, matrix)
+    return [matrix @ Vector(point) for point in points]
+
+
+def finalize(objs, prefix, hotspot=None, names=None):
+    """Name meshes `<prefix>` (or `names[obj]` for parts the runtime looks up),
+    put each origin at its geometry centre and tag the hotspot."""
+    names = names or {}
+    for obj in objs:
+        obj.name = names.get(obj, prefix)
+        obj.data.name = obj.name
+        tag(obj, hotspot)
+    select_only(objs)
+    bpy.ops.object.origin_set(type="ORIGIN_GEOMETRY", center="BOUNDS")
+    return objs
+
+
+def by_material(objs, name):
+    """Meshes whose first material is `name` (Blender may add a .001 suffix)."""
+    def matches(obj):
+        material = obj.data.materials[0] if obj.data.materials else None
+        return material is not None and (material.name == name or material.name.startswith(name + "."))
+    return [obj for obj in objs if matches(obj)]
+
+
+def rotate_about(objs, centre, degrees, axis="Z"):
+    centre = Vector(centre)
+    transform(objs, Matrix.Translation(centre) @ Matrix.Rotation(math.radians(degrees), 4, axis) @ Matrix.Translation(-centre))
+
+
 def clear_scene():
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete(use_global=False)
@@ -219,9 +350,10 @@ def clear_scene():
 
 def build_room():
     # Dark, deep floor and one back wall: from above the desk floats in a lamp
-    # pool, so there is no diorama box edge to explain.
-    cube("room-floor", (0, 0, 0), (28, 18, 0.18), NIGHT, 0.0)
-    cube("room-back-wall", (0, 3.9, 4.0), (28, 0.18, 8.0), NIGHT, 0.0)
+    # pool, so there is no diorama box edge to explain. Both carry real (CC0)
+    # surface texture; the runtime tints them down to midnight.
+    box_uv(cube("room-floor", (0, 0, 0), (28, 18, 0.18), pbr_material("Midnight Floor", "concrete_floor_worn_001"), 0.0), 6.0)
+    box_uv(cube("room-back-wall", (0, 3.9, 4.0), (28, 0.18, 8.0), pbr_material("Midnight Plaster", "painted_plaster_wall"), 0.0), 5.0)
     # A night window gives the cool counter-light its motivation.
     flat_plane("room-window-sky", (3.2, 3.79, 4.2), 3.6, 2.2, NIGHT_SKY, tilt_x=90)
     for x in (1.4, 3.2, 5.0):
@@ -229,156 +361,284 @@ def build_room():
     for z in (3.1, 5.3):
         cube("room-window-mullion", (3.2, 3.76, z), (3.7, 0.06, 0.08), SLATE, 0.0)
 
-    cube("desk-top", (0, -0.55, DESK_TOP - 0.09), (10.8, 3.8, 0.18), WALNUT, 0.06)
+    # Walnut veneer (CC0), grain running along the desk; one repeat per ~4 units.
+    box_uv(cube("desk-top", (0, -0.55, DESK_TOP - 0.09), (10.8, 3.8, 0.18), pbr_material("Walnut Desk", "walnut_veneer_02"), 0.06), 4.0)
     for x in (-4.8, 4.8):
         cube("desk-leg", (x, -0.55, 0.78), (0.24, 2.8, 1.55), SLATE, 0.04)
     cube("desk-crossbar", (0, 0.35, 0.72), (9.6, 0.14, 0.14), SLATE, 0.02)
 
 
 def build_lamp():
-    """Ambient architect lamp; its shade anchors the runtime spotlight."""
-    base = (-4.7, 1.0)
-    cylinder("desk-lamp-base", (*base, DESK_TOP + 0.05), 0.42, 0.1, LAMP_METAL, vertices=32)
-    elbow = (-4.9, 0.9, 4.4)
-    shade = Vector((-4.0, -0.35, 4.55))
-    rod("desk-lamp-arm", (*base, DESK_TOP + 0.1), elbow, 0.045, LAMP_METAL)
-    rod("desk-lamp-arm", elbow, shade, 0.04, LAMP_METAL)
-    cylinder("desk-lamp-joint", elbow, 0.08, 0.12, LAMP_METAL, vertices=16, rotation=(0, math.pi / 2, 0))
-    aim = Vector((-0.3, -1.0, DESK_TOP)) - shade
-    bpy.ops.mesh.primitive_cone_add(vertices=32, radius1=0.5, radius2=0.16, depth=0.6, location=shade, end_fill_type="NOTHING")
-    cone = bpy.context.object
-    cone.name = "desk-lamp-shade"
-    # A cone's wide end is at -Z; aim -Z at the desk.
-    cone.rotation_euler = (-aim).to_track_quat("Z", "Y").to_euler()
-    apply_material(cone, LAMP_METAL)
-    sphere("desk-lamp-bulb", shade + aim.normalized() * 0.16, (0.15, 0.15, 0.15), BULB)
+    """Luxo L-1 architect lamp clamped to the back edge of the desk. The shade
+    marker anchors the runtime spotlight."""
+    parts = import_model("lamp-luxo.glb")
+    # Model units: clamp near the origin, head reaching +Y at ~0.7 high.
+    clamp, head, bulb = Vector((0.0, -0.01, 0.0)), Vector((0.006, 0.13, 0.71)), Vector((0.006, 0.16, 0.68))
+    scale = 3.2
+    # Clamped to the back edge left of the monitor, its elbow out behind the
+    # desk and its head reaching forward, so the light falls in front of the
+    # monitor and never shadows the resume.
+    turn = math.degrees(math.atan2(-1.0, 0.5)) - 90
+    matrix = (
+        Matrix.Translation((-4.3, 1.38, DESK_TOP))
+        @ Matrix.Rotation(math.radians(turn), 4, "Z")
+        @ Matrix.Diagonal((scale, scale, scale, 1))
+        @ Matrix.Translation(-clamp)
+    )
+    transform(parts, matrix)
+    finalize(parts, "desk-lamp-body")
+    shade = empty("desk-lamp-shade", matrix @ head)
+    # Parented so the optimiser never prunes the shade marker as an empty leaf.
+    parent_keep_world(sphere("desk-lamp-bulb", matrix @ bulb, (0.09, 0.09, 0.09), BULB), shade)
 
 
 def build_monitor():
-    """A 34-inch 21:9 ultrawide, leaning back 20° so the screen reads from above.
-
-    It is the "At a glance" overview: the elevator pitch for recruiters."""
-    lean = math.radians(20)
-    x, y = -1.1, 0.95
-    width, height = 5.3, 2.32
-    hinge_z = DESK_TOP + 0.4
-    center = (x, y + math.sin(lean) * height / 2, hinge_z + math.cos(lean) * height / 2)
-    rounded_slab("overview-monitor", center, width, height, 0.14, 0.06, SLATE, "overview", rotation=(math.pi / 2 - lean, 0, 0))
-    screen_center = (center[0], center[1] - math.cos(lean) * 0.075, center[2] + math.sin(lean) * 0.075)
-    flat_plane("monitor-portfolio-screen", screen_center, 5.12, 2.14, SLATE, "overview", tilt_x=90 - 20)
-    surface("overview", (screen_center[0], screen_center[1] - 0.01, screen_center[2] + 0.003), 5.12, 2.14, tilt_x=90 - 20)
-    rod("overview-monitor-neck", (x, y + 0.3, DESK_TOP), (x, y + 0.08, hinge_z + 0.25), 0.11, ALUMINIUM, "overview")
-    rounded_slab("overview-monitor-foot", (x, y + 0.2, DESK_TOP + 0.03), 1.7, 0.8, 0.05, 0.3, ALUMINIUM, "overview")
-    tape_label("overview", (x + 1.3, y - 0.36, DESK_TOP + 0.005), math.radians(-3))
+    """A 34-inch 21:9 curved ultrawide. The panel tilts back 18° on its stand so
+    the screen reads from above. Ambient only: the runtime paints a wallpaper."""
+    tilt = 18
+    x, y = -1.1, 0.72
+    # Turned so the screen faces -Y (the viewer); the panel spans X.
+    parts = import_model("monitor.glb", rotation=(0, 0, -90))
+    screen = by_material(parts, "Material.003")[0]
+    low, high = bounds([screen])
+    # Re-project the screen's UVs (u across, v up) so the wallpaper maps straight on.
+    uv = screen.data.uv_layers.active or screen.data.uv_layers.new()
+    for loop in screen.data.loops:
+        co = screen.data.vertices[loop.vertex_index].co
+        uv.data[loop.index].uv = ((co.x - low.x) / (high.x - low.x), (co.z - low.z) / (high.z - low.z))
+    panel = [obj for obj in parts if bounds([obj])[0].z > 0.8]
+    # Tilt about the stand's mount, at the back of the panel.
+    pivot = Matrix.Translation((0, 0.5, 1.9)) @ Matrix.Rotation(math.radians(-tilt), 4, "X") @ Matrix.Translation((0, -0.5, -1.9))
+    transform(panel, pivot)
+    # The source is 32:9; narrow it to 21:9.
+    fit(parts, "z", 2.9, (x, y, DESK_TOP), stretch=(0.8, 1, 1))
+    # The power LED ships very hot; at desk scale it should be a pinprick.
+    for obj in parts:
+        for material in obj.data.materials:
+            principled = material.node_tree.nodes.get("Principled BSDF") if material and material.use_nodes else None
+            if principled:
+                principled.inputs["Emission Strength"].default_value *= 0.12
+    finalize(parts, "overview-monitor", names={screen: "monitor-portfolio-screen"})
 
 
 def build_laptop():
-    """A 14-inch MacBook Pro (M3 Pro) in space black: unibody, notch, black keys,
-    speaker grilles either side and a wide trackpad. Front row: work is the
-    second thing a recruiter reads."""
+    """A MacBook Pro in space black, lid open. Front row: work is the second
+    thing a recruiter reads."""
     x, y = 0.75, -1.15
-    width, depth = 2.11, 1.49
-    rounded_slab("hotspot-work-laptop", (x, y, DESK_TOP + 0.03), width, depth, 0.06, 0.07, SPACE_BLACK, "work")
-    keys_y = y + 0.24
-    for row in range(6):
-        for col in range(12):
-            key_w = 0.115 if row else 0.115
-            cube("laptop-key", (x - 0.7 + col * 0.127, keys_y - 0.3 + row * 0.12, DESK_TOP + 0.062), (key_w, 0.1 if row else 0.05, 0.008), MAC_KEY, 0.006, "work")
-    for side in (-1, 1):
-        for dot_row in range(14):
-            cube("laptop-speaker", (x + side * 0.93, keys_y - 0.33 + dot_row * 0.05, DESK_TOP + 0.061), (0.07, 0.012, 0.004), MAC_KEY, 0.0, "work")
-    rounded_slab("laptop-trackpad", (x, y - 0.44, DESK_TOP + 0.061), 0.96, 0.52, 0.004, 0.035, SPACE_BLACK, "work", edge=0)
-    lean = math.radians(20)
-    lid_h = 1.43
-    hinge = (x, y + depth / 2, DESK_TOP + 0.06)
-    center = (x, hinge[1] + math.sin(lean) * lid_h / 2, hinge[2] + math.cos(lean) * lid_h / 2)
-    rounded_slab("laptop-screen", center, width, lid_h, 0.04, 0.07, SPACE_BLACK, "work", rotation=(math.pi / 2 - lean, 0, 0))
-    face = (center[0], center[1] - math.cos(lean) * 0.021, center[2] + math.sin(lean) * 0.021)
-    rounded_plane("laptop-bezel", face, 2.05, 1.37, 0.06, GLASS_BLACK, "work", tilt_x=90 - 20)
-    glow_center = (face[0], face[1] - math.cos(lean) * 0.002, face[2] + math.sin(lean) * 0.002 - 0.01)
-    flat_plane("laptop-display", glow_center, 1.94, 1.26, SCREEN, "work", tilt_x=90 - 20)
-    surface("work", (glow_center[0], glow_center[1] - 0.02, glow_center[2] + 0.006), 1.94, 1.26, tilt_x=90 - 20)
-    notch_offset = 1.26 / 2 - 0.02
-    notch = (glow_center[0], glow_center[1] + math.sin(lean) * notch_offset - math.cos(lean) * 0.004, glow_center[2] + math.cos(lean) * notch_offset)
-    rounded_plane("laptop-notch", notch, 0.15, 0.045, 0.015, GLASS_BLACK, "work", tilt_x=90 - 20)
-    for index, line_width in enumerate((1.1, 0.7, 0.9, 0.5)):
-        offset = 0.3 - index * 0.17
-        cube(
-            "laptop-code-line",
-            (x - 0.55 + line_width / 2, glow_center[1] - math.cos(lean) * 0.012 - math.sin(lean) * offset, glow_center[2] + math.cos(lean) * offset),
-            (line_width, 0.01, 0.045),
-            AQUA,
-            0.0,
-            "work",
-            rotation=(-lean, 0, 0),
-        )
-    tape_label("work", (x - 0.62, y - 0.47, DESK_TOP + 0.065), math.radians(4))
+    parts = import_model("laptop.glb")
+    display = by_material(parts, "xelfFIHMTwrMhxW")[0]
+    # Width 2.2 desk units; the base (not the leaning lid) centres on (x, y).
+    low, high = bounds(parts)
+    base_offset = (low.y + high.y) / 2 * (2.2 / (high.x - low.x))
+    fit(parts, "x", 2.2, (x, y + base_offset, DESK_TOP))
+    low, high = bounds([display])
+    rise, run = high.z - low.z, high.y - low.y
+    lean = math.atan2(run, rise)
+    finalize(parts, "hotspot-work-laptop", "work", {display: "laptop-display"})
+    normal = Vector((0, -math.cos(lean), math.sin(lean)))
+    surface("work", (low + high) / 2 + normal * 0.02, high.x - low.x, math.hypot(rise, run), tilt_x=90 - math.degrees(lean))
+    tape_label("work", (x - 0.35, y - 1.0, DESK_TOP + 0.005), math.radians(4))
+
+
+def outline_slab(name, outline, z, height, mat, hotspot=None, edge=0.03):
+    """A slab whose footprint is the polygon `outline` (counter-clockwise XY),
+    from `z` up by `height`, with softened edges."""
+    count = len(outline)
+    verts = [(px, py, z) for px, py in outline] + [(px, py, z + height) for px, py in outline]
+    faces = [tuple(reversed(range(count))), tuple(range(count, 2 * count))]
+    faces += [(index, (index + 1) % count, count + (index + 1) % count, count + index) for index in range(count)]
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(verts, [], faces)
+    mesh.update()
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.collection.objects.link(obj)
+    apply_material(obj, mat)
+    if edge:
+        bevel(obj, edge, segments=3)
+    box_uv(obj, 0.6)
+    return tag(obj, hotspot)
+
+
+def sculpted_key(name, location, size, height, mat, hotspot, rotation_z=0.0, taper=0.78):
+    """A keycap that narrows toward its top, like a real sculpted profile."""
+    bpy.ops.mesh.primitive_cube_add(location=location)
+    obj = bpy.context.object
+    obj.name = name
+    obj.scale = (size[0] / 2, size[1] / 2, height / 2)
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    for vertex in obj.data.vertices:
+        if vertex.co.z > 0:
+            vertex.co.x *= taper
+            vertex.co.y *= taper
+    apply_material(obj, mat)
+    bevel(obj, 0.012)
+    obj.rotation_euler = (0, 0, rotation_z)
+    return tag(obj, hotspot)
+
+
+
+
+def convex_hull(points):
+    """Monotone-chain convex hull, counter-clockwise."""
+    points = sorted(set(points))
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    lower, upper = [], []
+    for point in points:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], point) <= 0:
+            lower.pop()
+        lower.append(point)
+    for point in reversed(points):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], point) <= 0:
+            upper.pop()
+        upper.append(point)
+    return lower[:-1] + upper[:-1]
+
+
+def boolean(target, other, operation):
+    modifier = target.modifiers.new("combine", "BOOLEAN")
+    modifier.operation = operation
+    modifier.object = other
+    modifier.solver = "EXACT"
+    select_only([target])
+    bpy.ops.object.modifier_apply(modifier=modifier.name)
+    bpy.data.objects.remove(other, do_unlink=True)
 
 
 def build_keyboard():
-    """A split keyboard: black cases, blue keycaps, and an angled thumb cluster per half."""
+    """Darren's Corne Choc Pro: per half a matte-black case shaped around its
+    keys (stepping with the column stagger and wrapping the thumb cluster),
+    with a rim standing up around low-profile Choc keycaps in cyan, three thumb
+    keys (the inner one a 1.5u turned inward) and a reflective display flush
+    against the index column. No cable. Each keycap top carries a
+    `keyboard-legend` plane the browser paints a skill onto."""
     y = 0.3
-    halves = (2.3, 3.65)
-    for x in halves:
-        left_half = x == halves[0]
-        cube("hotspot-skills-keyboard" if left_half else "keyboard-half", (x, y, DESK_TOP + 0.06), (1.22, 1.1, 0.12), KEYBOARD_BASE, 0.045, "skills")
-        for row in range(4):
-            for col in range(6):
-                key = (x - 0.42 + col * 0.17, y - 0.22 + row * 0.22)
-                cube("keyboard-key", (*key, DESK_TOP + 0.15), (0.13, 0.16, 0.05), KEYCAP_BLUE, 0.012, "skills")
-                # A printable keycap top: the browser paints skill legends onto these.
-                flat_plane("keyboard-legend", (*key, DESK_TOP + 0.1765), 0.118, 0.148, KEYCAP_BLUE, "skills")
-        inward = 1 if left_half else -1
-        for index in range(3):
-            thumb = (x + inward * (0.12 + index * 0.19), y - 0.46 - index * 0.02)
-            cube(
-                "keyboard-thumb-key",
-                (*thumb, DESK_TOP + 0.15),
-                (0.17, 0.15, 0.05),
-                KEYCAP_BLUE,
-                0.012,
-                "skills",
-                rotation=(0, 0, math.radians(-10 * inward)),
-            )
-            flat_plane("keyboard-legend", (*thumb, DESK_TOP + 0.1765), 0.158, 0.138, KEYCAP_BLUE, "skills", math.radians(-10 * inward))
-    middle = sum(halves) / 2
-    surface("skills", (middle, y, DESK_TOP + 0.19), 2.6, 1.1)
-    tape_label("skills", (middle, y + 0.68, DESK_TOP + 0.005), math.radians(-3))
+    pitch_x, pitch_y = 0.18, 0.17
+    cap_w, cap_d, key_height = 0.172, 0.162, 0.04
+    stagger = (0.0, 0.0, 0.045, 0.07, 0.045, 0.03)  # pinky → index
+    thumbs = ((0.09, -0.375, 0, 1.0), (0.285, -0.395, -8, 1.0), (0.5, -0.335, -22, 1.5))
+    # The display fills its column: as tall as the index keys, flush against them.
+    display_x, display_y, display_w, display_d = 0.622, 0.065, 0.15, 0.37
+    case_height, floor, wall = 0.105, 0.065, 0.03
 
+    def column_x(col):
+        return (col - 2.5) * pitch_x
+
+    def main_outline(margin):
+        """Counter-clockwise footprint of the key block plus display, `margin` out from the keys."""
+        def span(col):
+            # Steps between columns are chamfered, not vertical: a vertical
+            # step reads as a slit in the case.
+            chamfer = 0.012
+            left = column_x(col) - (cap_w / 2 + margin if col == 0 else pitch_x / 2 - chamfer)
+            right = column_x(col) + pitch_x / 2 - (chamfer if col < 5 else 0)
+            return left, right
+
+        # Along the bottom left → right, up past the display, then along the top right → left.
+        bottom = [point for col in range(6) for point in ((span(col)[0], -pitch_y + stagger[col] - cap_d / 2 - margin), (span(col)[1], -pitch_y + stagger[col] - cap_d / 2 - margin))]
+        top = [point for col in reversed(range(6)) for point in ((span(col)[1], pitch_y + stagger[col] + cap_d / 2 + margin), (span(col)[0], pitch_y + stagger[col] + cap_d / 2 + margin))]
+        d_left, d_right = column_x(5) + pitch_x / 2, display_x + display_w / 2 + margin
+        d_low, d_high = display_y - display_d / 2 - margin, display_y + display_d / 2 + margin
+        ring = bottom + [(d_left, d_low), (d_right, d_low), (d_right, d_high), (d_left, d_high)] + top
+        cleaned = []
+        for point in ring:
+            point = (round(point[0], 5), round(point[1], 5))
+            if not cleaned or point != cleaned[-1]:
+                cleaned.append(point)
+        return cleaned[:-1] if cleaned[0] == cleaned[-1] else cleaned
+
+    def thumb_outline(margin):
+        corners = []
+        for px, py, degrees, length in thumbs:
+            depth = cap_d + (length - 1) * pitch_y
+            turn = math.radians(degrees)
+            for sx in (-1, 1):
+                for sy in (-1, 1):
+                    corner = Vector((sx * (cap_w / 2 + margin), sy * (depth / 2 + margin)))
+                    corner.rotate(Matrix.Rotation(turn, 2))
+                    corners.append((round(px + corner.x, 5), round(py + corner.y, 5)))
+        # Reach up into the key block so the two shapes join cleanly.
+        corners += [(-0.02, -0.2), (0.62, -0.2)]
+        return convex_hull(corners)
+
+    floor_top = DESK_TOP + floor
+    for centre_x, side in ((2.2, 1), (3.8, -1)):
+        def place(px, py):
+            return (centre_x + side * px, y + py)
+
+        def footprint(outline):
+            points = [place(px, py) for px, py in outline]
+            return list(reversed(points)) if side < 0 else points  # mirroring flips the winding
+
+        name = "hotspot-skills-keyboard" if side > 0 else "keyboard-half"
+        case = outline_slab(name, footprint(main_outline(wall + 0.005)), DESK_TOP, case_height, KEYBOARD_BASE, "skills", edge=0)
+        boolean(case, outline_slab("thumb-shell", footprint(thumb_outline(wall + 0.005)), DESK_TOP, case_height, KEYBOARD_BASE, edge=0), "UNION")
+        # The pocket the keys sit in: the same shapes, a wall's width tighter.
+        pocket = outline_slab("pocket", footprint(main_outline(0.012)), floor_top, 0.2, KEYBOARD_BASE, edge=0)
+        boolean(pocket, outline_slab("thumb-pocket", footprint(thumb_outline(0.012)), floor_top, 0.2, KEYBOARD_BASE, edge=0), "UNION")
+        boolean(case, pocket, "DIFFERENCE")
+        # Tidy the boolean result (no bevel: on boolean geometry it throws spikes).
+        select_only([case])
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.mesh.select_all(action="SELECT")
+        bpy.ops.mesh.remove_doubles(threshold=0.0005)
+        bpy.ops.mesh.dissolve_degenerate(threshold=0.0005)
+        bpy.ops.mesh.normals_make_consistent(inside=False)
+        bpy.ops.object.mode_set(mode="OBJECT")
+        for polygon in case.data.polygons:
+            polygon.use_smooth = False
+        box_uv(case, 0.6)
+
+        display = place(display_x, display_y)
+        # A raised display module, its glass close to the rim like the real board.
+        cube("keyboard-display-bezel", (*display, floor_top + 0.0175), (display_w, display_d, 0.035), KEYBOARD_BASE, 0.004, "skills")
+        flat_plane(f"keyboard-display-{'left' if side > 0 else 'right'}", (*display, floor_top + 0.0355), display_w - 0.025, display_d - 0.035, DISPLAY, "skills")
+        keys = [(column_x(col), pitch_y * (1 - row) + stagger[col], 0, 1.0) for row in range(3) for col in range(6)]
+        keys += list(thumbs)
+        for index, (px, py, degrees, length) in enumerate(keys):
+            kx, ky = place(px, py)
+            turn = math.radians(degrees * side)
+            thumb = index >= 18
+            depth = cap_d + (length - 1) * pitch_y
+            cube("keyboard-switch", (kx, ky, floor_top + 0.009), (0.15, 0.14, 0.018), SWITCH, 0.004, "skills", rotation=(0, 0, turn))
+            sculpted_key("keyboard-thumb-key" if thumb else "keyboard-key", (kx, ky, floor_top + 0.02 + key_height / 2), (cap_w, depth), key_height, KEYCAP_BLUE, "skills", turn, taper=0.93)
+            flat_plane("keyboard-legend", (kx, ky, floor_top + 0.02 + key_height + 0.002), cap_w * 0.93 - 0.012, depth - cap_w * 0.07 - 0.012, KEYCAP_BLUE, "skills", turn)
+    surface("skills", (3.0, y - 0.05, DESK_TOP + 0.2), 2.9, 1.0)
+    tape_label("skills", (3.0, y + 0.64, DESK_TOP + 0.005), math.radians(-3))
 
 def build_projects():
-    """A fanned stack of folders with coloured tabs: reads as 'a body of work'."""
+    """A document folder with papers peeking out: reads as 'a body of work'."""
     x, y = -2.85, -1.2
-    folders = ((TEAL_FOLDER, -10), (CORAL_FOLDER, 4), (MANILA, -2))
-    for index, (mat, degrees) in enumerate(folders):
-        z = DESK_TOP + 0.03 + index * 0.06
-        angle = math.radians(degrees)
-        cube("projects-folder", (x + index * 0.05, y + index * 0.04, z), (1.35, 1.0, 0.05), mat, 0.015, "projects", rotation=(0, 0, angle))
-        tab_offset = Vector((-0.4 + index * 0.4, 0.55, 0))
-        tab_offset.rotate(Euler((0, 0, angle)))
-        cube("projects-folder-tab", (x + index * 0.05 + tab_offset.x, y + index * 0.04 + tab_offset.y, z), (0.36, 0.14, 0.05), mat, 0.012, "projects", rotation=(0, 0, angle))
-    cube("projects-sheet", (x + 0.3, y - 0.2, DESK_TOP + 0.075), (0.9, 0.7, 0.01), PAPER, 0.0, "projects", rotation=(0, 0, math.radians(14)))
-    # A clean brief clipped on top of the stack: the page the project content prints onto.
-    flat_plane("projects-brief", (x + 0.1, y + 0.06, DESK_TOP + 0.176), 1.2, 0.86, PAPER, "projects", math.radians(-2))
-    surface("projects", (x + 0.1, y + 0.06, DESK_TOP + 0.18), 1.2, 0.86, math.radians(-2))
-    tape_label("projects", (x + 0.05, y - 0.15, DESK_TOP + 0.19), math.radians(-6))
+    parts = import_model("folder.glb", rotation=(0, 0, 90))
+    fit(parts, "x", 1.6, (x, y, DESK_TOP))
+    rotate_about(parts, (x, y, DESK_TOP), -4)
+    top = bounds(parts)[1].z
+    finalize(parts, "projects-folder", "projects")
+    # A clean brief laid on the folder: the page the project content prints onto.
+    flat_plane("projects-brief", (x + 0.04, y - 0.02, top + 0.004), 1.24, 0.9, PAPER, "projects", math.radians(-2))
+    surface("projects", (x + 0.04, y - 0.02, top + 0.01), 1.2, 0.86, math.radians(-2))
+    tape_label("projects", (x + 0.05, y - 0.38, top + 0.008), math.radians(-6))
 
 
 def build_teaching():
     """An open spiral notebook with a pen: reads as 'explaining things'."""
     x, y = -4.45, -1.45
-    rotation = math.radians(-4)
-    cube("teaching-notebook-cover", (x, y, DESK_TOP + 0.015), (1.6, 1.08, 0.03), SLATE, 0.01, "teaching", rotation=(0, 0, rotation))
-    for side in (-1, 1):
-        cube("teaching-notebook-page", (x + side * 0.39, y, DESK_TOP + 0.045), (0.74, 1.0, 0.03), PAPER, 0.01, "teaching", rotation=(0, side * math.radians(2), rotation))
-        for line in range(5):
-            width = 0.5 if line % 2 else 0.38
-            cube("notebook-line", (x + side * 0.39 - 0.05, y + 0.3 - line * 0.15, DESK_TOP + 0.064), (width, 0.018, 0.004), AMBER if side < 0 else SLATE, 0.0, "teaching", rotation=(0, 0, rotation))
-    for ring in range(8):
-        cylinder("teaching-notebook-ring", (x, y - 0.42 + ring * 0.12, DESK_TOP + 0.07), 0.04, 0.12, ALUMINIUM, vertices=10, rotation=(0, math.pi / 2, 0), hotspot="teaching")
-    rod("teaching-pen", (x + 0.15, y - 0.55, DESK_TOP + 0.09), (x + 0.75, y + 0.35, DESK_TOP + 0.09), 0.03, AMBER, "teaching")
-    surface("teaching", (x, y, DESK_TOP + 0.075), 1.5, 1.0, rotation)
-    tape_label("teaching", (x - 0.2, y + 0.68, DESK_TOP + 0.005), math.radians(3))
+    turn = -4
+    rotation = math.radians(turn)
+    parts = import_model("notebook.glb")
+    fit(parts, "x", 1.6, (x, y, DESK_TOP))
+    pages = [obj for obj in parts if obj.data.materials and obj.data.materials[0].name.startswith("M_Paper")]
+    page_top = bounds(pages)[1].z
+    rotate_about(parts, (x, y, DESK_TOP), turn)
+    finalize(parts, "teaching-notebook", "teaching")
+    # Handwritten notes laid on each page; the browser writes them.
+    for side, name in ((-1, "left"), (1, "right")):
+        offset = Vector((side * 0.375, 0, 0))
+        offset.rotate(Euler((0, 0, rotation)))
+        flat_plane(f"notebook-notes-{name}", (x + offset.x, y + offset.y, page_top + 0.003), 0.75, 0.9, PAPER, "teaching", rotation)
+    rod("teaching-pen", (x + 0.15, y - 0.5, page_top + 0.03), (x + 0.72, y + 0.32, page_top + 0.03), 0.03, AMBER, "teaching")
+    surface("teaching", (x, y, page_top + 0.012), 1.5, 0.9, rotation)
+    tape_label("teaching", (x - 0.15, y + 0.8, DESK_TOP + 0.005), math.radians(3))
 
 
 def build_profile():
@@ -403,55 +663,95 @@ def build_profile():
 
 
 def build_education():
-    """A certificate with the graduation cap resting on its corner: one academic group."""
+    """A Dean's List certificate with the graduation cap resting on its corner."""
     x, y = 2.85, -1.3
     turn = math.radians(6)
-    cube("education-certificate", (x, y, DESK_TOP + 0.008), (1.26, 0.9, 0.014), PAPER, 0.004, "education", rotation=(0, 0, turn))
-    surface("education", (x, y, DESK_TOP + 0.02), 1.26, 0.9, turn)
-    for index, width in enumerate((0.7, 0.5, 0.6)):
-        offset = Vector((-0.12, 0.22 - index * 0.13, 0))
-        offset.rotate(Euler((0, 0, turn)))
-        cube("education-cert-line", (x + offset.x, y + offset.y, DESK_TOP + 0.017), (width, 0.03, 0.004), SLATE, 0.0, "education", rotation=(0, 0, turn))
-    seal = Vector((-0.38, -0.24, 0))
+    # Nanyang Poly's Director's List certificate, tucked beneath SMU's at an angle.
+    under_turn = math.radians(-7)
+    under = Vector((-0.12, 0.1, 0))
+    cube("education-certificate", (x + under.x, y + under.y, DESK_TOP + 0.004), (1.26, 0.9, 0.008), PAPER, 0.003, "education", rotation=(0, 0, under_turn))
+    flat_plane("education-certificate-face-2", (x + under.x, y + under.y, DESK_TOP + 0.0085), 1.24, 0.88, PAPER, "education", under_turn)
+    cube("education-certificate", (x, y, DESK_TOP + 0.016), (1.26, 0.9, 0.012), PAPER, 0.004, "education", rotation=(0, 0, turn))
+    surface("education", (x, y, DESK_TOP + 0.026), 1.26, 0.9, turn)
+    # The printed face: the browser paints the Dean's List certificate onto it.
+    flat_plane("education-certificate-face", (x, y, DESK_TOP + 0.023), 1.24, 0.88, PAPER, "education", turn)
+    # Bottom right: the printed text runs down the left, the cap sits top right.
+    seal = Vector((0.4, -0.26, 0))
     seal.rotate(Euler((0, 0, turn)))
-    cylinder("education-seal", (x + seal.x, y + seal.y, DESK_TOP + 0.025), 0.11, 0.02, AMBER, vertices=24, hotspot="education")
+    cylinder("education-seal", (x + seal.x, y + seal.y, DESK_TOP + 0.033), 0.11, 0.02, AMBER, vertices=24, hotspot="education")
     for side in (-1, 1):
-        cube("education-seal-ribbon", (x + seal.x + side * 0.05, y + seal.y - 0.14, DESK_TOP + 0.018), (0.06, 0.2, 0.006), AMBER, 0.0, "education", rotation=(0, 0, math.radians(side * 14)))
-    cap = (x + 0.6, y + 0.25)
-    cap_z = DESK_TOP + 0.015
-    cylinder("education-cap-skull", (*cap, cap_z + 0.11), 0.28, 0.22, SLATE, hotspot="education")
-    cube("education-cap-board", (*cap, cap_z + 0.24), (0.86, 0.86, 0.04), SLATE, 0.01, "education", rotation=(0, 0, math.radians(18)))
-    cylinder("education-cap-button", (*cap, cap_z + 0.27), 0.04, 0.03, AMBER, vertices=12, hotspot="education")
-    rod("education-tassel", (cap[0], cap[1], cap_z + 0.27), (cap[0] - 0.36, cap[1] - 0.3, cap_z + 0.25), 0.015, AMBER, "education")
-    rod("education-tassel", (cap[0] - 0.36, cap[1] - 0.3, cap_z + 0.25), (cap[0] - 0.38, cap[1] - 0.33, cap_z + 0.03), 0.03, AMBER, "education")
+        cube("education-seal-ribbon", (x + seal.x + side * 0.05, y + seal.y - 0.14, DESK_TOP + 0.028), (0.06, 0.2, 0.006), AMBER, 0.0, "education", rotation=(0, 0, math.radians(side * 14)))
+    # A fabric mortarboard (CC-BY Sketchfab) resting on the certificate's corner,
+    # its tassel falling toward the viewer.
+    cap = import_model("grad-cap.glb", rotation=(0, 0, 200))
+    fit(cap, "x", 1.0, (x + 0.6, y + 0.25, DESK_TOP + 0.015))
+    finalize(cap, "education-cap", "education")
     tape_label("education", (x - 0.05, y - 0.7, DESK_TOP + 0.005), math.radians(-4))
 
 
 def build_contact():
-    """A phone lying face up with a glowing screen."""
+    """An iPhone 17 Pro Max in Deep Blue lying face up; the runtime paints its lock screen."""
     x, y = 4.75, -1.55
-    rotation = math.radians(-12)
-    # Pro Max proportions (~0.48 : 1), rounded titanium-style frame, thin bezels.
-    rounded_slab("contact-phone", (x, y, DESK_TOP + 0.036), 0.5, 1.04, 0.07, 0.08, PHONE_FRAME, "contact", rotation=(0, 0, rotation), edge=0.012)
-    rounded_slab("contact-phone-glass", (x, y, DESK_TOP + 0.068), 0.484, 1.024, 0.006, 0.074, GLASS_BLACK, "contact", rotation=(0, 0, rotation), edge=0)
-    rounded_plane("contact-phone-screen", (x, y, DESK_TOP + 0.0715), 0.45, 0.99, 0.058, SCREEN, "contact", rotation)
-    surface("contact", (x, y, DESK_TOP + 0.078), 0.45, 0.99, rotation)
-    island = Vector((0, 0.43, 0))
-    island.rotate(Euler((0, 0, rotation)))
-    rounded_slab("phone-dynamic-island", (x + island.x, y + island.y, DESK_TOP + 0.0735), 0.11, 0.032, 0.002, 0.0159, GLASS_BLACK, "contact", rotation=(0, 0, rotation), edge=0)
-    cube("phone-notification", (x - 0.02, y + 0.24, DESK_TOP + 0.076), (0.36, 0.12, 0.004), AQUA, 0.0, "contact", rotation=(0, 0, rotation))
+    turn = -12
+    rotation = math.radians(turn)
+    # Stood upright in the source with the screen facing -X; lay it face up, top to the back.
+    parts = import_model("phone.glb", rotation=(0, 90, 90))
+    screen = by_material(parts, "screen.001")[0]
+    # The source is Cosmic Orange; Darren's phone is Deep Blue. Recolour every
+    # untextured orange part (back, frame, camera surrounds).
+    deep_blue = (0.018, 0.034, 0.085, 1.0)
+    for obj in parts:
+        for material in obj.data.materials:
+            # Several of the source's shells face inward; single-sided they read as see-through.
+            if material:
+                material.use_backface_culling = False
+            principled = material.node_tree.nodes.get("Principled BSDF") if material and material.use_nodes else None
+            if not principled or principled.inputs["Base Color"].links:
+                continue
+            r, g, b, _ = principled.inputs["Base Color"].default_value
+            if r > 0.15 and r > 2 * b and r > 1.3 * g:
+                principled.inputs["Base Color"].default_value = deep_blue
+    fit(parts, "y", 1.04, (x, y, DESK_TOP))
+    # Point every face outward: the source's inward normals let depth-based
+    # passes (AO) see straight through the phone.
+    for obj in parts:
+        select_only([obj])
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.mesh.select_all(action="SELECT")
+        bpy.ops.mesh.normals_make_consistent(inside=False)
+        bpy.ops.object.mode_set(mode="OBJECT")
+    # The screen is a single sheet, so "outward" is ambiguous: face it up.
+    if sum(polygon.normal.z for polygon in screen.data.polygons) < 0:
+        screen.data.flip_normals()
+    low, high = bounds([screen])
+    width, length = high.x - low.x, high.y - low.y
+    # Re-project the screen's UVs (u across, v toward the top) so the runtime's
+    # painted lock screen maps straight onto the glass.
+    uv = screen.data.uv_layers.active or screen.data.uv_layers.new()
+    for loop in screen.data.loops:
+        co = screen.data.vertices[loop.vertex_index].co
+        uv.data[loop.index].uv = ((co.x - low.x) / width, (co.y - low.y) / length)
+    rotate_about(parts, (x, y, DESK_TOP), turn)
+    low, high = bounds([screen])
+    centre = (low + high) / 2
+    finalize(parts, "contact-phone", "contact", {screen: "contact-phone-screen"})
+    surface("contact", (centre.x, centre.y, high.z + 0.006), width * 0.97, length * 0.97, rotation)
     tape_label("contact", (x - 0.1, y - 0.76, DESK_TOP + 0.005), math.radians(5))
 
 
 def build_ambient_props():
     # Mug under the lamp: the runtime adds steam above `ambient-mug`.
-    mug = (-3.55, 0.35)
-    cylinder("ambient-mug", (*mug, DESK_TOP + 0.21), 0.24, 0.42, CERAMIC, vertices=32)
-    cylinder("ambient-mug-coffee", (*mug, DESK_TOP + 0.4), 0.21, 0.02, COFFEE, vertices=32)
-    bpy.ops.mesh.primitive_torus_add(major_radius=0.13, minor_radius=0.035, location=(mug[0] + 0.27, mug[1], DESK_TOP + 0.22), rotation=(math.pi / 2, 0, 0))
-    handle = bpy.context.object
-    handle.name = "ambient-mug-handle"
-    apply_material(handle, CERAMIC)
+    parts = import_model("mug.glb", rotation=(0, 0, -90))
+    fit(parts, "z", 0.45, (-3.5, 0.35, DESK_TOP))
+    for obj in parts:
+        for material in obj.data.materials:
+            # The source ships an alpha channel it never uses; keep the glaze opaque.
+            principled = material.node_tree.nodes.get("Principled BSDF") if material and material.use_nodes else None
+            if principled:
+                for link in list(principled.inputs["Alpha"].links):
+                    material.node_tree.links.remove(link)
+                principled.inputs["Alpha"].default_value = 1.0
+    finalize(parts, "ambient-mug")
 
 
 def build_guide_robot():
@@ -474,7 +774,7 @@ def build_guide_robot():
 
 
 def group_hotspot_roots():
-    hotspot_ids = ("overview", "projects", "work", "skills", "teaching", "education", "contact", "profile")
+    hotspot_ids = ("projects", "work", "skills", "teaching", "education", "contact", "profile")
     roots = {}
     for hotspot_id in hotspot_ids:
         root = empty(f"hotspot-root-{hotspot_id}")
@@ -526,7 +826,7 @@ def main():
     scene.world.color = (0.012, 0.016, 0.03)
 
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    bpy.ops.wm.save_as_mainfile(filepath=str(ROOT / "public" / "assets" / "workstation.blend"))
+    bpy.ops.wm.save_as_mainfile(filepath=str(SOURCES / "workstation.blend"))
     bpy.ops.export_scene.gltf(filepath=str(OUTPUT), export_format="GLB", export_apply=True, export_lights=False, export_cameras=False)
     print(f"WORKSTATION_GLTF={OUTPUT}")
 

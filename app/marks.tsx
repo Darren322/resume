@@ -311,30 +311,3 @@ export function RecordMark({ item, className, decorative = true }: { item: Resum
     </span>
   );
 }
-
-type NavigatorMark =
-  | { kind: "organization"; id: OrganizationMarkId }
-  | { kind: "technology"; id: TechnologyMarkId }
-  | { kind: "monogram"; label: string };
-
-const navigatorMarks: Record<NodeId, NavigatorMark> = {
-  profile: { kind: "monogram", label: "DN" },
-  work: { kind: "organization", id: "edb" },
-  projects: { kind: "technology", id: "docker" },
-  teaching: { kind: "organization", id: "smu" },
-  education: { kind: "organization", id: "smu" },
-  skills: { kind: "technology", id: "typescript" },
-  contact: { kind: "monogram", label: "@" },
-};
-
-export function NodeMark({ id }: { id: NodeId }) {
-  const mark = navigatorMarks[id];
-  if (mark.kind === "organization") return <OrganizationMark id={mark.id} className="navigator-mark" />;
-  if (mark.kind === "technology") return <TechIcon id={mark.id} className="navigator-mark" />;
-
-  return (
-    <span className="navigator-mark navigator-mark-mono" aria-hidden="true">
-      {mark.label}
-    </span>
-  );
-}
