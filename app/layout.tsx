@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Bricolage_Grotesque, Caveat, JetBrains_Mono } from "next/font/google";
 import type { ReactNode } from "react";
 import { preload } from "react-dom";
+import { Analytics } from "@vercel/analytics/next";
 import { deskModels, fullDeskMedia, lightDeskMedia, site, siteUrl } from "./site";
 import "../styles.css";
 
@@ -63,7 +64,10 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
   preload(deskModels.full, { as: "fetch", crossOrigin: "anonymous", media: fullDeskMedia });
   return (
     <html lang="en" className={`${display.variable} ${hand.variable} ${code.variable}`}>
-      <body>{children}</body>
+      <body>
+        {children}
+        <Analytics />
+      </body>
     </html>
   );
 }
